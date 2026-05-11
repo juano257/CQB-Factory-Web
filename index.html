@@ -23,9 +23,11 @@
       <nav class="top-tabs">
         <button class="top-tab active" data-page-tab="inicio">Inicio</button>
         <button class="top-tab" data-page-tab="partidas">Partidas</button>
+        <button id="moderate-tab-btn" class="top-tab hidden" data-page-tab="moderar">Moderar</button>
         <button class="top-tab" data-page-tab="contacto">Contacto</button>
       </nav>
       <button id="header-cta" class="btn btn-primary">Crear cuenta</button>
+      <p id="header-player-name" class="header-player-name hidden"></p>
     </header>
 
     <main>
@@ -153,6 +155,9 @@
                   Contrasena
                   <input type="password" name="password" required />
                 </label>
+                <p class="rank-info-box">
+                  Tu rango sera calculado segun tu cantidad de partidas jugadas y tu porcentaje de victorias, cada cierto tiempo regalaremos equipo a el mejor jugador de cada temporada y se reiniciaran los rangos de todos los agentes activos,¿Estas listo para el reto?
+                </p>
                 <button class="btn btn-primary" type="submit">Entrar a mi cuenta</button>
               </form>
             </div>
@@ -208,6 +213,50 @@
               <ul id="reservations-list" class="reservations-list"></ul>
             </div>
           </div>
+        </section>
+      </section>
+
+      <section id="tab-moderar" class="page-tab-panel hidden">
+        <section id="moderator-panel" class="section moderator-panel hidden">
+          <div class="section-head compact moderator-head">
+            <div>
+              <p class="eyebrow">Administracion</p>
+              <h2>Moderar partidas</h2>
+            </div>
+            <button id="moderator-refresh-btn" class="btn btn-ghost" type="button">Actualizar</button>
+          </div>
+
+          <p class="hero-copy">
+            Revisa cada partida, ve los jugadores inscritos por equipo y marca el equipo ganador al finalizar.
+          </p>
+
+          <section class="season-box">
+            <div class="season-head">
+              <div>
+                <p class="eyebrow">Temporadas</p>
+                <h3 id="season-name">Sin temporada activa</h3>
+              </div>
+              <span id="season-status" class="status-pill status-played">Cerrada</span>
+            </div>
+            <p id="season-dates" class="season-dates">Inicia una temporada para habilitar estadisticas y cierres.</p>
+            <div class="season-actions">
+              <button id="season-end-btn" class="btn btn-ghost" type="button">Terminar temporada</button>
+              <button id="season-start-btn" class="btn btn-primary" type="button">Iniciar nueva temporada</button>
+            </div>
+          </section>
+
+          <div class="moderator-summary">
+            <article>
+              <span id="moderator-pending-count" class="value">0</span>
+              <span class="label">Reservas pendientes</span>
+            </article>
+            <article>
+              <span id="moderator-played-count" class="value">0</span>
+              <span class="label">Reservas cerradas</span>
+            </article>
+          </div>
+
+          <ul id="moderator-reservations-list" class="moderation-events-list"></ul>
         </section>
       </section>
 

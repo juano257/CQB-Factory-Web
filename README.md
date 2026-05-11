@@ -27,8 +27,13 @@ npm run dev
 - `POST /api/auth/login`
 - `POST /api/auth/logout` (Bearer token)
 - `GET /api/me` (Bearer token)
+- `GET /api/seasons/current` (Bearer token)
 - `GET /api/events`
-- `POST /api/events/:eventId/reserve` (Bearer token)
+- `POST /api/events/:eventId/reserve` (Bearer token, body: `{"team":"rojo"|"azul"}`)
+- `GET /api/moderation/reservations` (Bearer token de admin o moderator)
+- `POST /api/moderation/events/:eventId/result` (Bearer token de admin o moderator, body: `{"winningTeam":"rojo"|"azul"}`)
+- `POST /api/moderation/seasons/end` (Bearer token de admin o moderator)
+- `POST /api/moderation/seasons/start` (Bearer token de admin o moderator)
 - `POST /api/reservations/:reservationId/result` (Bearer token, body: `{"result":"win"|"loss"}`)
 
 ## Base de datos de jugadores
@@ -44,3 +49,11 @@ Tabla `jugadores`:
 - `derrotas`
 - `partidas_jugadas`
 - `reservas_activas`
+
+Tabla `reservas`:
+
+- `jugador_id`
+- `evento_id`
+- `equipo`
+- `estado`
+- `resultado`

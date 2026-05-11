@@ -15,9 +15,20 @@ const {
   hasReservaActiva,
   countReservasActivasPorEvento,
   createReserva,
-  getReservaByIdForJugador,
+  getReservaById,
+  getReservasActivasPorEvento,
+  getReservasParaModeracion,
+  getTemporadaActual,
+  countReservasActivasTemporada,
+  cerrarTemporadaActiva,
+  iniciarNuevaTemporada,
   setResultadoReserva,
+  setResultadosEventoPorEquipo,
 } = require("./db");
+
+function isStaffRole(role) {
+  return role === "moderator" || role === "admin";
+}
 
 const app = express();
 
@@ -30,9 +41,32 @@ function mapReserva(reserva) {
     eventId: reserva.evento_id,
     eventTitle: reserva.evento_titulo,
     eventDate: reserva.evento_fecha,
+    team: reserva.equipo,
     status: reserva.estado,
     result: reserva.resultado || null,
     createdAt: reserva.created_at,
+  };
+}
+
+function mapReservaModeracion(reserva) {
+  return {
+    ...mapReserva(reserva),
+    playerId: reserva.jugador_id,
+    playerName: reserva.jugador_nombre,
+    playerEmail: reserva.jugador_correo,
+  };
+}
+
+function mapTemporada(temporada) {
+  if (!temporada) return null;
+
+  return {
+    id: temporada.id,
+    number: temporada.numero,
+    name: temporada.nombre,
+    status: temporada.estado,
+    startedAt: temporada.started_at,
+    endedAt: temporada.ended_at || null,
   };
 }
 
@@ -41,6 +75,7 @@ function sanitizeJugador(jugador, reservas = []) {
     id: jugador.id,
     name: jugador.nombre,
     email: jugador.correo,
+    role: jugador.rol || "user",
     createdAt: jugador.created_at,
     matchesPlayed: jugador.partidas_jugadas,
     wins: jugador.victorias,
@@ -118,6 +153,16 @@ function authMiddleware(req, res, next) {
   return next();
 }
 
+function moderatorMiddleware(req, res, next) {
+  if (!isStaffRole(req.jugador?.rol)) {
+    return res.status(403).json({
+      message: "Solo administradores o moderadores pueden usar esta seccion.",
+    });
+  }
+
+  return next();
+}
+
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "cqb-backend", database: "sqlite" });
 });
@@ -140,6 +185,7 @@ app.post("/api/auth/register", (req, res) => {
     nombre: String(name).trim(),
     correo: normalizedEmail,
     contrasena: String(password),
+    rol: "user",
     victorias: 0,
     derrotas: 0,
     partidas_jugadas: 0,
@@ -192,9 +238,23 @@ app.get("/api/events", (req, res) => {
   return res.json({ events });
 });
 
+app.get("/api/seasons/current", authMiddleware, (req, res) => {
+  return res.json({ season: mapTemporada(getTemporadaActual()) });
+});
+
 app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
   const { eventId } = req.params;
+  const team = String(req.body?.team || "").trim().toLowerCase();
+  const season = getTemporadaActual();
   const event = getEventoById(eventId);
+
+  if (!season) {
+    return res.status(409).json({ message: "No hay temporada activa. Espera a que inicie la siguiente temporada." });
+  }
+
+  if (!["rojo", "azul"].includes(team)) {
+    return res.status(400).json({ message: "Debes elegir equipo rojo o azul" });
+  }
 
   if (!event) {
     return res.status(404).json({ message: "Partida no encontrada" });
@@ -215,6 +275,7 @@ app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
     evento_id: event.id,
     evento_titulo: event.titulo,
     evento_fecha: event.fecha,
+    equipo: team,
     estado: "upcoming",
     resultado: null,
     created_at: new Date().toISOString(),
@@ -229,27 +290,100 @@ app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
   });
 });
 
-app.post("/api/reservations/:reservationId/result", authMiddleware, (req, res) => {
+app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMiddleware, (req, res) => {
   const { reservationId } = req.params;
-  const { result } = req.body;
+  const result = String(req.body?.result || "").trim().toLowerCase();
 
-  if (result !== "win" && result !== "loss") {
-    return res.status(400).json({ message: "result debe ser win o loss" });
+  if (!["win", "loss"].includes(result)) {
+    return res.status(400).json({ message: "El resultado debe ser win o loss" });
   }
 
-  const target = getReservaByIdForJugador(reservationId, req.jugador.id);
-  if (!target) {
+  const reservation = getReservaById(reservationId);
+  if (!reservation) {
     return res.status(404).json({ message: "Reserva no encontrada" });
   }
 
-  if (target.estado !== "upcoming") {
-    return res.status(409).json({ message: "La reserva ya tiene resultado" });
+  if (reservation.estado !== "upcoming") {
+    return res.status(409).json({ message: "Esta reserva ya fue cerrada" });
   }
 
-  setResultadoReserva(reservationId, req.jugador.id, result);
-  const freshJugador = getJugadorById(req.jugador.id);
+  setResultadoReserva(reservationId, reservation.jugador_id, result);
 
-  return res.json({ user: buildProfile(freshJugador) });
+  const freshReservation = getReservaById(reservationId);
+  const freshPlayer = getJugadorById(reservation.jugador_id);
+
+  return res.json({
+    reservation: mapReserva(freshReservation),
+    player: buildProfile(freshPlayer),
+  });
+});
+
+app.get("/api/moderation/reservations", authMiddleware, moderatorMiddleware, (req, res) => {
+  const reservations = getReservasParaModeracion().map(mapReservaModeracion);
+  return res.json({ reservations });
+});
+
+app.post("/api/moderation/events/:eventId/result", authMiddleware, moderatorMiddleware, (req, res) => {
+  const { eventId } = req.params;
+  const winningTeam = String(req.body?.winningTeam || "").trim().toLowerCase();
+
+  if (!["rojo", "azul"].includes(winningTeam)) {
+    return res.status(400).json({ message: "El equipo ganador debe ser rojo o azul" });
+  }
+
+  const event = getEventoById(eventId);
+  if (!event) {
+    return res.status(404).json({ message: "Partida no encontrada" });
+  }
+
+  const activeReservations = getReservasActivasPorEvento(eventId);
+  if (activeReservations.length === 0) {
+    return res.status(409).json({ message: "La partida no tiene reservas pendientes por cerrar" });
+  }
+
+  const updatedCount = setResultadosEventoPorEquipo(eventId, winningTeam);
+  const reservations = getReservasParaModeracion()
+    .filter((reservation) => reservation.evento_id === eventId)
+    .map(mapReservaModeracion);
+
+  return res.json({
+    event: {
+      id: event.id,
+      title: event.titulo,
+      winningTeam,
+      updatedCount,
+    },
+    reservations,
+  });
+});
+
+app.post("/api/moderation/seasons/end", authMiddleware, moderatorMiddleware, (req, res) => {
+  const temporada = getTemporadaActual();
+  if (!temporada) {
+    return res.status(409).json({ message: "No hay temporada activa para cerrar" });
+  }
+
+  const activeReservations = countReservasActivasTemporada();
+  if (activeReservations > 0) {
+    return res.status(409).json({
+      message: "Debes cerrar primero todas las partidas pendientes antes de terminar la temporada",
+    });
+  }
+
+  const closedSeason = cerrarTemporadaActiva();
+  return res.json({ season: mapTemporada(closedSeason) });
+});
+
+app.post("/api/moderation/seasons/start", authMiddleware, moderatorMiddleware, (req, res) => {
+  const activeSeason = getTemporadaActual();
+  if (activeSeason) {
+    return res.status(409).json({
+      message: "Ya existe una temporada activa. Cierrala antes de iniciar una nueva.",
+    });
+  }
+
+  const newSeason = iniciarNuevaTemporada();
+  return res.status(201).json({ season: mapTemporada(newSeason) });
 });
 
 app.use(express.static(path.join(__dirname, "..")));

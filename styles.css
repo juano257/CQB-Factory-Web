@@ -98,6 +98,17 @@ body {
   color: #fff;
 }
 
+.header-player-name {
+  margin: 0;
+  padding: 0.58rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 145, 114, 0.45);
+  background: rgba(32, 40, 30, 0.82);
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
 main {
   width: min(1100px, 92vw);
   margin: 0 auto;
@@ -377,6 +388,22 @@ h1 {
   gap: 0.55rem;
 }
 
+.team-picker {
+  gap: 0.45rem;
+}
+
+.team-picker span {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b5bcac;
+}
+
+.team-picker select {
+  font-size: 0.92rem;
+}
+
 .event-meta {
   display: flex;
   justify-content: space-between;
@@ -425,6 +452,17 @@ h1 {
   gap: 0.6rem;
 }
 
+.rank-info-box {
+  margin: 0.1rem 0 0;
+  padding: 0.72rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(157, 93, 47, 0.5);
+  background: rgba(157, 93, 47, 0.16);
+  color: #e6ddd0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 label {
   display: grid;
   gap: 0.35rem;
@@ -432,7 +470,8 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+select {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -442,7 +481,8 @@ input {
   font: inherit;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: 2px solid rgba(126, 143, 89, 0.34);
   border-color: var(--olive);
 }
@@ -475,6 +515,147 @@ input:focus {
   border-radius: 12px;
   background: rgba(32, 41, 30, 0.82);
   border: 1px dashed var(--border);
+}
+
+.moderator-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(130, 145, 114, 0.24);
+}
+
+.moderator-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.moderator-head h3 {
+  margin: 0.1rem 0 0;
+}
+
+.moderator-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.moderator-summary article {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  background: rgba(25, 34, 24, 0.92);
+}
+
+.season-box {
+  margin-top: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.9rem;
+  background: rgba(24, 33, 23, 0.92);
+}
+
+.season-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.season-head h3 {
+  margin: 0.1rem 0 0;
+}
+
+.season-dates {
+  margin: 0.5rem 0 0;
+  color: #b5bcac;
+  font-size: 0.9rem;
+}
+
+.season-actions {
+  margin-top: 0.7rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.moderation-events-list {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.moderation-event-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(23, 31, 22, 0.92);
+}
+
+.moderation-event-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.moderation-scoreboard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.moderation-scoreboard article {
+  border: 1px solid rgba(130, 145, 114, 0.22);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: rgba(29, 38, 27, 0.85);
+}
+
+.moderation-team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.moderation-team-column {
+  border: 1px solid rgba(130, 145, 114, 0.22);
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: rgba(18, 25, 18, 0.84);
+}
+
+.moderation-team-column h4 {
+  margin: 0 0 0.6rem;
+  font-family: "Bebas Neue", sans-serif;
+  font-size: 1.5rem;
+  letter-spacing: 0.03em;
+}
+
+.moderation-player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.moderation-player-item {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 10px;
+  background: rgba(32, 41, 30, 0.78);
+  border: 1px solid rgba(130, 145, 114, 0.18);
+}
+
+.moderation-player-item.empty {
+  color: #b5bcac;
 }
 
 .reservations-list {
@@ -532,6 +713,16 @@ input:focus {
   font-size: 0.95rem;
 }
 
+.moderator-details {
+  flex: 1;
+}
+
+.moderator-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -539,6 +730,28 @@ input:focus {
   padding: 0.2rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 800;
+}
+
+.team-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.team-rojo {
+  background: rgba(132, 64, 45, 0.32);
+  color: #f2c8bb;
+  border: 1px solid rgba(178, 95, 73, 0.5);
+}
+
+.team-azul {
+  background: rgba(49, 89, 137, 0.3);
+  color: #c8dcf7;
+  border: 1px solid rgba(94, 142, 204, 0.48);
 }
 
 .status-upcoming {
@@ -630,5 +843,22 @@ input:focus {
   .contact-layout,
   .account-layout {
     grid-template-columns: 1fr;
+  }
+
+  .moderation-team-grid,
+  .moderation-scoreboard {
+    grid-template-columns: 1fr;
+  }
+
+  .moderator-head,
+  .reservation-item,
+  .moderation-event-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .reservation-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 }
