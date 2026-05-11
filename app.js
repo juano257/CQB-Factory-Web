@@ -1,51 +1,9 @@
-const STORAGE_USERS = "cqb_users";
-const STORAGE_SESSION = "cqb_session";
-
-const events = [
-  {
-    id: "evt-1",
-    title: "Operacion Tactica Nocturna",
-    date: "2026-05-22T20:00:00",
-    level: "Intermedio",
-    price: "$14",
-    slots: 40,
-  },
-  {
-    id: "evt-2",
-    title: "CQB Sabado | Turno Manana",
-    date: "2026-05-23T10:30:00",
-    level: "Principiante",
-    price: "$10",
-    slots: 40,
-  },
-  {
-    id: "evt-3",
-    title: "CQB Sabado | Turno Tarde",
-    date: "2026-05-23T17:00:00",
-    level: "Intermedio",
-    price: "$12",
-    slots: 40,
-  },
-  {
-    id: "evt-4",
-    title: "CQB Domingo | Turno Manana",
-    date: "2026-05-24T11:00:00",
-    level: "Principiante",
-    price: "$10",
-    slots: 40,
-  },
-  {
-    id: "evt-5",
-    title: "Liga Squad Domingo | Turno Tarde",
-    date: "2026-05-24T16:30:00",
-    level: "Avanzado",
-    price: "$18",
-    slots: 40,
-  },
-];
+const STORAGE_TOKEN = "cqb_token";
 
 const state = {
+  token: localStorage.getItem(STORAGE_TOKEN),
   currentUser: null,
+  events: [],
 };
 
 const refs = {
@@ -83,24 +41,37 @@ const pagePanels = {
   contacto: refs.tabContacto,
 };
 
-function getUsers() {
-  return JSON.parse(localStorage.getItem(STORAGE_USERS) || "{}");
+async function apiRequest(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+
+  if (state.token) {
+    headers.Authorization = `Bearer ${state.token}`;
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    headers,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload.message || "Error inesperado en la solicitud";
+    throw new Error(message);
+  }
+
+  return payload;
 }
 
-function setUsers(users) {
-  localStorage.setItem(STORAGE_USERS, JSON.stringify(users));
-}
-
-function getCurrentSessionEmail() {
-  return localStorage.getItem(STORAGE_SESSION);
-}
-
-function saveSession(email) {
-  localStorage.setItem(STORAGE_SESSION, email);
-}
-
-function clearSession() {
-  localStorage.removeItem(STORAGE_SESSION);
+function saveToken(token) {
+  state.token = token;
+  if (token) {
+    localStorage.setItem(STORAGE_TOKEN, token);
+  } else {
+    localStorage.removeItem(STORAGE_TOKEN);
+  }
 }
 
 function getBadge(matchesPlayed, winRate) {
@@ -122,21 +93,6 @@ function getWinLossRatio(wins, losses) {
   return (wins / losses).toFixed(2);
 }
 
-function readCurrentUser() {
-  const email = getCurrentSessionEmail();
-  if (!email) return null;
-
-  const users = getUsers();
-  return users[email] || null;
-}
-
-function writeCurrentUser(nextUser) {
-  const users = getUsers();
-  users[nextUser.email] = nextUser;
-  setUsers(users);
-  state.currentUser = nextUser;
-}
-
 function formatDate(isoDate) {
   const date = new Date(isoDate);
   return date.toLocaleDateString("es-MX", {
@@ -148,47 +104,121 @@ function formatDate(isoDate) {
   });
 }
 
-function getEventById(eventId) {
-  return events.find((event) => event.id === eventId) || null;
-}
-
-function getAllReservationsByEvent(eventId) {
-  const users = getUsers();
-  return Object.values(users)
-    .flatMap((user) => user.reservations || [])
-    .filter((reservation) => reservation.eventId === eventId && reservation.status === "upcoming");
-}
-
-function getRemainingSlots(event) {
-  return Math.max(0, event.slots - getAllReservationsByEvent(event.id).length);
-}
-
 function getEventsInMonth(date) {
   const year = date.getFullYear();
   const month = date.getMonth();
 
-  return events.filter((event) => {
+  return state.events.filter((event) => {
     const eventDate = new Date(event.date);
     return eventDate.getFullYear() === year && eventDate.getMonth() === month;
   }).length;
 }
 
+function showMessage(text, isError = false) {
+  refs.authMessage.textContent = text;
+  refs.authMessage.style.color = isError ? "#9b1d1d" : "#2f4b1f";
+}
+
 function renderHeroMetrics() {
-  if (!refs.eventsMonthValue || !refs.eventsMonthLabel) return;
-
   const now = new Date();
-  const eventsInMonth = getEventsInMonth(now);
-
-  refs.eventsMonthValue.textContent = String(eventsInMonth);
+  refs.eventsMonthValue.textContent = String(getEventsInMonth(now));
   refs.eventsMonthLabel.textContent = "Eventos este mes";
+}
+
+function renderAuthView() {
+  const user = state.currentUser;
+  if (!user) {
+    refs.authGuestView.classList.remove("hidden");
+    refs.authUserView.classList.add("hidden");
+    refs.welcomeText.textContent = "";
+    return;
+  }
+
+  refs.authGuestView.classList.add("hidden");
+  refs.authUserView.classList.remove("hidden");
+  refs.welcomeText.textContent = `Bienvenido, ${user.name}.`;
+}
+
+function renderDashboard() {
+  const user = state.currentUser;
+
+  if (!user) {
+    refs.statPlayed.textContent = "0";
+    refs.statUpcoming.textContent = "0";
+    refs.statWins.textContent = "0";
+    refs.statLosses.textContent = "0";
+    refs.statRatio.textContent = "0.00";
+    refs.statBadge.textContent = "Recluta";
+    refs.nextMatchText.textContent = "Inicia sesion para ver tu agenda.";
+    refs.reservationsList.innerHTML = "<li class='reservation-item'>Sin actividad aun.</li>";
+    return;
+  }
+
+  const reservations = user.reservations || [];
+  const upcoming = reservations.filter((reservation) => reservation.status === "upcoming");
+  const played = user.matchesPlayed || 0;
+  const wins = user.wins || 0;
+  const losses = user.losses || 0;
+  const winRate = toPercent(wins, played);
+
+  refs.statPlayed.textContent = String(played);
+  refs.statUpcoming.textContent = String(upcoming.length);
+  refs.statWins.textContent = String(wins);
+  refs.statLosses.textContent = String(losses);
+  refs.statRatio.textContent = getWinLossRatio(wins, losses);
+  refs.statBadge.textContent = getBadge(played, winRate);
+
+  if (upcoming.length > 0) {
+    const nearest = [...upcoming]
+      .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())[0];
+    refs.nextMatchText.textContent = `${nearest.eventTitle} | ${formatDate(nearest.eventDate)}`;
+  } else {
+    refs.nextMatchText.textContent = "No tienes reservas activas.";
+  }
+
+  const rows = reservations
+    .slice()
+    .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
+    .map((reservation) => {
+      const statusClass = reservation.status === "played" ? "status-played" : "status-upcoming";
+      const statusText =
+        reservation.status === "played"
+          ? reservation.result === "win"
+            ? "Victoria"
+            : "Derrota"
+          : "Reservada";
+
+      const actionBtn =
+        reservation.status === "upcoming"
+          ? `<div class="reservation-actions">
+              <button class="btn btn-result-win" data-reservation-id="${reservation.id}" data-result="win">Victoria</button>
+              <button class="btn btn-result-loss" data-reservation-id="${reservation.id}" data-result="loss">Derrota</button>
+            </div>`
+          : "";
+
+      return `
+        <li class="reservation-item">
+          <div class="reservation-details">
+            <strong>${reservation.eventTitle}</strong>
+            <span>${formatDate(reservation.eventDate)}</span>
+            <span class="status-pill ${statusClass}">${statusText}</span>
+          </div>
+          ${actionBtn}
+        </li>
+      `;
+    });
+
+  refs.reservationsList.innerHTML = rows.length
+    ? rows.join("")
+    : "<li class='reservation-item'>Sin actividad aun.</li>";
 }
 
 function renderEvents() {
   const currentUser = state.currentUser;
 
-  refs.eventsGrid.innerHTML = events
+  refs.eventsGrid.innerHTML = state.events
     .map((event) => {
-      const remaining = getRemainingSlots(event);
+      const remaining = event.availableSlots;
       const alreadyJoined =
         currentUser?.reservations?.some(
           (reservation) => reservation.eventId === event.id && reservation.status === "upcoming"
@@ -221,233 +251,6 @@ function renderEvents() {
     .join("");
 }
 
-function renderDashboard() {
-  const user = state.currentUser;
-
-  if (!user) {
-    refs.statPlayed.textContent = "0";
-    refs.statUpcoming.textContent = "0";
-    refs.statWins.textContent = "0";
-    refs.statLosses.textContent = "0";
-    refs.statRatio.textContent = "0.00";
-    refs.statBadge.textContent = "Recluta";
-    refs.nextMatchText.textContent = "Inicia sesion para ver tu agenda.";
-    refs.reservationsList.innerHTML = "<li class='reservation-item'>Sin actividad aun.</li>";
-    return;
-  }
-
-  const reservations = user.reservations || [];
-  const upcoming = reservations.filter((reservation) => reservation.status === "upcoming");
-  const played = user.matchesPlayed || 0;
-  const wins = user.wins || 0;
-  const losses = user.losses || 0;
-  const winRate = toPercent(wins, played);
-  const lossRate = toPercent(losses, played);
-
-  refs.statPlayed.textContent = String(played);
-  refs.statUpcoming.textContent = String(upcoming.length);
-  refs.statWins.textContent = String(wins);
-  refs.statLosses.textContent = String(losses);
-  refs.statRatio.textContent = getWinLossRatio(wins, losses);
-  refs.statBadge.textContent = getBadge(played, winRate);
-
-  if (upcoming.length > 0) {
-    const nearest = [...upcoming]
-      .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())[0];
-    refs.nextMatchText.textContent = `${nearest.eventTitle} | ${formatDate(nearest.eventDate)}`;
-  } else {
-    refs.nextMatchText.textContent = "No tienes reservas activas.";
-  }
-
-  const rows = reservations
-    .slice()
-    .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
-    .map((reservation) => {
-      const statusClass = reservation.status === "played" ? "status-played" : "status-upcoming";
-      const statusText =
-        reservation.status === "played"
-          ? reservation.result === "win"
-            ? "Victoria"
-            : "Derrota"
-          : "Reservada";
-      const actionBtn =
-        reservation.status === "upcoming"
-          ? `<div class="reservation-actions">
-              <button class="btn btn-result-win" data-reservation-id="${reservation.id}" data-result="win">Victoria</button>
-              <button class="btn btn-result-loss" data-reservation-id="${reservation.id}" data-result="loss">Derrota</button>
-            </div>`
-          : "";
-
-      return `
-        <li class="reservation-item">
-          <div class="reservation-details">
-            <strong>${reservation.eventTitle}</strong>
-            <span>${formatDate(reservation.eventDate)}</span>
-            <span class="status-pill ${statusClass}">${statusText}</span>
-          </div>
-          ${actionBtn}
-        </li>
-      `;
-    });
-
-  refs.reservationsList.innerHTML = rows.length
-    ? rows.join("")
-    : "<li class='reservation-item'>Sin actividad aun.</li>";
-}
-
-function renderAuthView() {
-  const user = state.currentUser;
-  if (!user) {
-    refs.authGuestView.classList.remove("hidden");
-    refs.authUserView.classList.add("hidden");
-    refs.welcomeText.textContent = "";
-    return;
-  }
-
-  refs.authGuestView.classList.add("hidden");
-  refs.authUserView.classList.remove("hidden");
-  refs.welcomeText.textContent = `Bienvenido, ${user.name}.`;
-}
-
-function showMessage(text, isError = false) {
-  refs.authMessage.textContent = text;
-  refs.authMessage.style.color = isError ? "#9b1d1d" : "#2f4b1f";
-}
-
-function registerUser(formData) {
-  const name = formData.get("name")?.toString().trim();
-  const email = formData.get("email")?.toString().trim().toLowerCase();
-  const password = formData.get("password")?.toString();
-
-  if (!name || !email || !password) {
-    showMessage("Completa todos los campos para continuar.", true);
-    return;
-  }
-
-  const users = getUsers();
-  if (users[email]) {
-    showMessage("Este correo ya tiene una cuenta.", true);
-    return;
-  }
-
-  const user = {
-    name,
-    email,
-    password,
-    createdAt: new Date().toISOString(),
-    matchesPlayed: 0,
-    wins: 0,
-    losses: 0,
-    reservations: [],
-  };
-
-  users[email] = user;
-  setUsers(users);
-  saveSession(email);
-  state.currentUser = user;
-
-  refs.registerForm.reset();
-  showMessage("Cuenta creada con exito. Ya puedes inscribirte.");
-  render();
-}
-
-function loginUser(formData) {
-  const email = formData.get("email")?.toString().trim().toLowerCase();
-  const password = formData.get("password")?.toString();
-
-  const users = getUsers();
-  const user = users[email];
-
-  if (!user || user.password !== password) {
-    showMessage("Correo o contrasena incorrectos.", true);
-    return;
-  }
-
-  saveSession(email);
-  state.currentUser = user;
-  refs.loginForm.reset();
-  showMessage("Sesion iniciada. Revisa tus partidas en el panel.");
-  render();
-}
-
-function logoutUser() {
-  clearSession();
-  state.currentUser = null;
-  showMessage("Sesion cerrada.");
-  render();
-}
-
-function joinEvent(eventId) {
-  const user = state.currentUser;
-  if (!user) {
-    showMessage("Debes iniciar sesion para inscribirte.", true);
-    return;
-  }
-
-  const event = getEventById(eventId);
-  if (!event) return;
-
-  if (getRemainingSlots(event) <= 0) {
-    showMessage("Lo sentimos, esta partida se lleno.", true);
-    renderEvents();
-    return;
-  }
-
-  const alreadyJoined = user.reservations?.some(
-    (reservation) => reservation.eventId === event.id && reservation.status === "upcoming"
-  );
-
-  if (alreadyJoined) {
-    showMessage("Ya estas inscrito en esta partida.", true);
-    return;
-  }
-
-  const nextReservation = {
-    id: `${event.id}-${Date.now()}`,
-    eventId: event.id,
-    eventTitle: event.title,
-    eventDate: event.date,
-    status: "upcoming",
-    createdAt: new Date().toISOString(),
-  };
-
-  const nextUser = {
-    ...user,
-    reservations: [...(user.reservations || []), nextReservation],
-  };
-
-  writeCurrentUser(nextUser);
-  showMessage(`Reserva confirmada para ${event.title}.`);
-  render();
-}
-
-function registerMatchResult(reservationId, result) {
-  const user = state.currentUser;
-  if (!user) return;
-
-  const targetReservation = (user.reservations || []).find((reservation) => reservation.id === reservationId);
-  if (!targetReservation || targetReservation.status !== "upcoming") return;
-
-  const reservations = (user.reservations || []).map((reservation) => {
-    if (reservation.id !== reservationId) return reservation;
-    return { ...reservation, status: "played", result };
-  });
-
-  const wasWin = result === "win";
-
-  const nextUser = {
-    ...user,
-    reservations,
-    matchesPlayed: (user.matchesPlayed || 0) + 1,
-    wins: (user.wins || 0) + (wasWin ? 1 : 0),
-    losses: (user.losses || 0) + (wasWin ? 0 : 1),
-  };
-
-  writeCurrentUser(nextUser);
-  showMessage(wasWin ? "Resultado registrado: victoria." : "Resultado registrado: derrota.");
-  render();
-}
-
 function switchAuthTab(tabName) {
   const isRegister = tabName === "register";
   refs.registerForm.classList.toggle("hidden", !isRegister);
@@ -469,6 +272,125 @@ function switchPageTab(tabName) {
   });
 }
 
+async function refreshEvents() {
+  const data = await apiRequest("/api/events");
+  state.events = data.events || [];
+}
+
+async function refreshCurrentUser() {
+  if (!state.token) {
+    state.currentUser = null;
+    return;
+  }
+
+  try {
+    const data = await apiRequest("/api/me");
+    state.currentUser = data.user;
+  } catch (_error) {
+    saveToken(null);
+    state.currentUser = null;
+  }
+}
+
+async function registerUser(formData) {
+  const name = formData.get("name")?.toString().trim();
+  const email = formData.get("email")?.toString().trim().toLowerCase();
+  const password = formData.get("password")?.toString();
+
+  if (!name || !email || !password) {
+    showMessage("Completa todos los campos para continuar.", true);
+    return;
+  }
+
+  try {
+    const data = await apiRequest("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    });
+
+    saveToken(data.token);
+    state.currentUser = data.user;
+    refs.registerForm.reset();
+    showMessage("Cuenta creada con exito. Ya puedes inscribirte.");
+    await refreshEvents();
+    render();
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function loginUser(formData) {
+  const email = formData.get("email")?.toString().trim().toLowerCase();
+  const password = formData.get("password")?.toString();
+
+  try {
+    const data = await apiRequest("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+
+    saveToken(data.token);
+    state.currentUser = data.user;
+    refs.loginForm.reset();
+    showMessage("Sesion iniciada. Revisa tus partidas en el panel.");
+    await refreshEvents();
+    render();
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function logoutUser() {
+  try {
+    if (state.token) {
+      await apiRequest("/api/auth/logout", { method: "POST" });
+    }
+  } catch (_error) {
+    // Ignore logout failures and clear local session anyway.
+  }
+
+  saveToken(null);
+  state.currentUser = null;
+  showMessage("Sesion cerrada.");
+  await refreshEvents();
+  render();
+}
+
+async function joinEvent(eventId) {
+  if (!state.currentUser) {
+    showMessage("Debes iniciar sesion para inscribirte.", true);
+    return;
+  }
+
+  try {
+    const data = await apiRequest(`/api/events/${eventId}/reserve`, { method: "POST" });
+    state.currentUser = data.user;
+    showMessage(`Reserva confirmada para ${data.reservation.eventTitle}.`);
+    await refreshEvents();
+    render();
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function registerMatchResult(reservationId, result) {
+  if (!state.currentUser) return;
+
+  try {
+    const data = await apiRequest(`/api/reservations/${reservationId}/result`, {
+      method: "POST",
+      body: JSON.stringify({ result }),
+    });
+
+    state.currentUser = data.user;
+    showMessage(result === "win" ? "Resultado registrado: victoria." : "Resultado registrado: derrota.");
+    await refreshEvents();
+    render();
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
 function setupEvents() {
   refs.pageTabs.forEach((button) => {
     button.addEventListener("click", () => switchPageTab(button.dataset.pageTab));
@@ -478,29 +400,31 @@ function setupEvents() {
     button.addEventListener("click", () => switchAuthTab(button.dataset.tab));
   });
 
-  refs.registerForm.addEventListener("submit", (event) => {
+  refs.registerForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    registerUser(new FormData(refs.registerForm));
+    await registerUser(new FormData(refs.registerForm));
   });
 
-  refs.loginForm.addEventListener("submit", (event) => {
+  refs.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    loginUser(new FormData(refs.loginForm));
+    await loginUser(new FormData(refs.loginForm));
   });
 
-  refs.logoutBtn.addEventListener("click", logoutUser);
+  refs.logoutBtn.addEventListener("click", async () => {
+    await logoutUser();
+  });
 
-  refs.eventsGrid.addEventListener("click", (event) => {
+  refs.eventsGrid.addEventListener("click", async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) return;
 
     const eventId = target.dataset.eventId;
     if (!eventId || target.disabled) return;
 
-    joinEvent(eventId);
+    await joinEvent(eventId);
   });
 
-  refs.reservationsList.addEventListener("click", (event) => {
+  refs.reservationsList.addEventListener("click", async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) return;
 
@@ -509,10 +433,9 @@ function setupEvents() {
     if (!reservationId) return;
     if (result !== "win" && result !== "loss") return;
 
-    registerMatchResult(reservationId, result);
+    await registerMatchResult(reservationId, result);
   });
 
-  // Send users to the account section with the right tab selected.
   refs.headerCta.addEventListener("click", () => {
     switchPageTab("partidas");
     switchAuthTab("register");
@@ -539,10 +462,13 @@ function render() {
   renderEvents();
 }
 
-function init() {
-  state.currentUser = readCurrentUser();
+async function init() {
   switchPageTab("inicio");
   setupEvents();
+
+  await refreshEvents();
+  await refreshCurrentUser();
+
   render();
 }
 
