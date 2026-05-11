@@ -93,6 +93,20 @@ body {
   cursor: pointer;
 }
 
+.top-tab-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.top-tab-link:hover {
+  background: rgba(111, 127, 63, 0.18);
+}
+
 .top-tab.active {
   background: linear-gradient(120deg, var(--olive) 0%, var(--olive-dark) 100%);
   color: #fff;
@@ -422,6 +436,90 @@ h1 {
   font-weight: 800;
 }
 
+.payment-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 0.9rem;
+  padding-top: 2.2rem;
+}
+
+.payment-summary-card,
+.payment-form-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 1rem;
+}
+
+.payment-title {
+  font-family: "Bebas Neue", sans-serif;
+  font-size: clamp(2.1rem, 6vw, 4rem);
+  line-height: 0.95;
+  margin-top: 0.2rem;
+}
+
+.payment-form-card h2 {
+  font-family: "Bebas Neue", sans-serif;
+  font-size: 2.2rem;
+}
+
+.payment-summary-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.payment-summary-grid div {
+  border: 1px solid rgba(130, 145, 114, 0.22);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.2rem;
+  background: rgba(25, 34, 24, 0.92);
+}
+
+.payment-summary-grid strong {
+  font-size: 1rem;
+}
+
+.payment-alert {
+  margin-top: 0.9rem;
+  border: 1px solid rgba(141, 191, 103, 0.45);
+  background: rgba(97, 137, 69, 0.24);
+  color: #d4edc4;
+  padding: 0.72rem 0.8rem;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.payment-alert.error {
+  border-color: rgba(178, 95, 73, 0.5);
+  background: rgba(132, 64, 45, 0.32);
+  color: #f2c8bb;
+}
+
+.payment-provider-box {
+  border: 1px dashed rgba(130, 145, 114, 0.36);
+  border-radius: 10px;
+  background: rgba(27, 35, 26, 0.75);
+  padding: 0.8rem;
+}
+
+.payment-provider-box p {
+  margin: 0;
+}
+
+.payment-provider-box p + p {
+  margin-top: 0.5rem;
+}
+
+.payment-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
 .account-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -554,6 +652,27 @@ select:focus {
   background: rgba(25, 34, 24, 0.92);
 }
 
+.moderator-view-tabs {
+  margin-top: 0.9rem;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.moderator-view-tab {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 800;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+
+.moderator-view-tab.active {
+  background: #3f4838;
+}
+
 .season-box {
   margin-top: 0.85rem;
   border: 1px solid var(--border);
@@ -660,8 +779,81 @@ select:focus {
   border: 1px solid rgba(130, 145, 114, 0.18);
 }
 
+.moderation-player-head {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.moderation-player-actions {
+  margin-top: 0.35rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+}
+
+.btn-team-switch {
+  border-radius: 8px;
+  padding: 0.42rem 0.7rem;
+  border: 1px solid rgba(130, 145, 114, 0.45);
+  background: rgba(111, 127, 63, 0.22);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn-team-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .moderation-player-item.empty {
   color: #b5bcac;
+}
+
+.moderation-players-list {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.moderation-search-controls {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.moderation-pagination {
+  margin-top: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.moderation-player-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: rgba(23, 31, 22, 0.9);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.moderation-player-main {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.moderation-player-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  color: #c6cdc0;
 }
 
 .reservations-list {
@@ -847,13 +1039,27 @@ select:focus {
   .intro-grid,
   .brief-strip,
   .contact-layout,
-  .account-layout {
+  .account-layout,
+  .payment-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-summary-grid,
+  .payment-actions {
     grid-template-columns: 1fr;
   }
 
   .moderation-team-grid,
   .moderation-scoreboard {
     grid-template-columns: 1fr;
+  }
+
+  .moderation-search-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .moderation-pagination {
+    justify-content: flex-start;
   }
 
   .moderator-head,

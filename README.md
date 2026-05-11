@@ -29,8 +29,14 @@ npm run dev
 - `GET /api/me` (Bearer token)
 - `GET /api/seasons/current` (Bearer token)
 - `GET /api/events`
-- `POST /api/events/:eventId/reserve` (Bearer token, body: `{"team":"rojo"|"azul"}`)
+- `POST /api/payments/prepare` (Bearer token, body: `{"eventId":"...","team":"rojo"|"azul"}`)
+- `POST /api/payments/confirm` (Bearer token, body: `{"paymentToken":"..."}`)
+- `POST /api/events/:eventId/reserve` (Bearer token, body: `{"team":"rojo"|"azul","paymentToken":"..."}`)
+
+Nota: el pago esta preparado para integracion con proveedor externo. La pasarela real aun no esta conectada.
 - `GET /api/moderation/reservations` (Bearer token de admin o moderator)
+- `GET /api/moderation/players` (Bearer token de admin o moderator)
+- `POST /api/moderation/reservations/:reservationId/team` (Bearer token de admin o moderator, body: `{"team":"rojo"|"azul"}`)
 - `POST /api/moderation/events/:eventId/result` (Bearer token de admin o moderator, body: `{"winningTeam":"rojo"|"azul"}`)
 - `POST /api/moderation/seasons/end` (Bearer token de admin o moderator)
 - `POST /api/moderation/seasons/start` (Bearer token de admin o moderator)

@@ -457,6 +457,25 @@ function getReservaById(reservaId) {
   return db.prepare("SELECT * FROM reservas WHERE id = ?").get(reservaId);
 }
 
+function getJugadoresRegistrados() {
+  return db
+    .prepare(
+      `SELECT
+        id,
+        nombre,
+        correo,
+        rol,
+        victorias,
+        derrotas,
+        partidas_jugadas,
+        reservas_activas,
+        created_at
+      FROM jugadores
+      ORDER BY created_at DESC`
+    )
+    .all();
+}
+
 function getReservasParaModeracion() {
   const temporada = getTemporadaActual();
   if (!temporada) return [];
@@ -487,6 +506,19 @@ function getReservasActivasPorEvento(eventoId) {
       "SELECT * FROM reservas WHERE evento_id = ? AND temporada_id = ? AND estado = 'upcoming' ORDER BY created_at ASC"
     )
     .all(eventoId, temporada.id);
+}
+
+function setEquipoReservaModeracion(reservaId, equipo) {
+  const temporada = getTemporadaActual();
+  if (!temporada) return 0;
+
+  const result = db
+    .prepare(
+      "UPDATE reservas SET equipo = ? WHERE id = ? AND temporada_id = ? AND estado = 'upcoming'"
+    )
+    .run(equipo, reservaId, temporada.id);
+
+  return result.changes || 0;
 }
 
 function setResultadoReserva(reservaId, jugadorId, resultado) {
@@ -582,8 +614,10 @@ module.exports = {
   createReserva,
   getReservaByIdForJugador,
   getReservaById,
+  getJugadoresRegistrados,
   getReservasParaModeracion,
   getReservasActivasPorEvento,
+  setEquipoReservaModeracion,
   getTemporadaActual,
   countReservasActivasTemporada,
   cerrarTemporadaActiva,

@@ -16,7 +16,9 @@ const {
   countReservasActivasPorEvento,
   createReserva,
   getReservaById,
+  getJugadoresRegistrados,
   getReservasActivasPorEvento,
+  setEquipoReservaModeracion,
   getReservasParaModeracion,
   getTemporadaActual,
   countReservasActivasTemporada,
@@ -38,6 +40,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const pendingPayments = new Map();
+const PAYMENT_TTL_MS = 15 * 60 * 1000;
+
 function mapReserva(reserva) {
   return {
     id: reserva.id,
@@ -57,6 +62,20 @@ function mapReservaModeracion(reserva) {
     playerId: reserva.jugador_id,
     playerName: reserva.jugador_nombre,
     playerEmail: reserva.jugador_correo,
+  };
+}
+
+function mapJugadorModeracion(jugador) {
+  return {
+    id: jugador.id,
+    name: jugador.nombre,
+    email: jugador.correo,
+    role: jugador.rol || "user",
+    wins: jugador.victorias || 0,
+    losses: jugador.derrotas || 0,
+    matchesPlayed: jugador.partidas_jugadas || 0,
+    activeReservations: jugador.reservas_activas || 0,
+    createdAt: jugador.created_at,
   };
 }
 
@@ -166,6 +185,57 @@ function moderatorMiddleware(req, res, next) {
   return next();
 }
 
+function cleanupExpiredPayments() {
+  const now = Date.now();
+  for (const [token, payment] of pendingPayments.entries()) {
+    const createdAt = new Date(payment.createdAt).getTime();
+    if (now - createdAt > PAYMENT_TTL_MS) {
+      pendingPayments.delete(token);
+    }
+  }
+}
+
+function validateReservationEligibility(jugadorId, eventId, team) {
+  const season = getTemporadaActual();
+  const event = getEventoById(eventId);
+
+  if (!season) {
+    return {
+      ok: false,
+      status: 409,
+      message: "No hay temporada activa. Espera a que inicie la siguiente temporada.",
+    };
+  }
+
+  if (!event) {
+    return { ok: false, status: 404, message: "Partida no encontrada" };
+  }
+
+  if (!["rojo", "azul"].includes(team)) {
+    return { ok: false, status: 400, message: "Debes elegir equipo rojo o azul" };
+  }
+
+  const inscriptionValidation = validateInscriptionWindow(event.fecha);
+  if (!inscriptionValidation.canInscribe) {
+    return { ok: false, status: 409, message: inscriptionValidation.error };
+  }
+
+  if (hasReservaActiva(jugadorId, eventId)) {
+    return { ok: false, status: 409, message: "Ya tienes una reserva para esta partida" };
+  }
+
+  const booked = countReservasActivasPorEvento(eventId);
+  if (booked >= event.cupos) {
+    return { ok: false, status: 409, message: "No quedan cupos disponibles" };
+  }
+
+  return {
+    ok: true,
+    event,
+    season,
+  };
+}
+
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "cqb-backend", database: "sqlite" });
 });
@@ -257,38 +327,117 @@ app.get("/api/seasons/current", authMiddleware, (req, res) => {
   return res.json({ season: mapTemporada(getTemporadaActual()) });
 });
 
+app.post("/api/payments/prepare", authMiddleware, (req, res) => {
+  cleanupExpiredPayments();
+
+  const eventId = String(req.body?.eventId || "").trim();
+  const team = String(req.body?.team || "").trim().toLowerCase();
+  const eligibility = validateReservationEligibility(req.jugador.id, eventId, team);
+
+  if (!eligibility.ok) {
+    return res.status(eligibility.status).json({ message: eligibility.message });
+  }
+
+  const paymentToken = uuidv4();
+  pendingPayments.set(paymentToken, {
+    jugadorId: req.jugador.id,
+    eventId,
+    team,
+    status: "prepared",
+    amount: eligibility.event.precio,
+    eventTitle: eligibility.event.titulo,
+    createdAt: new Date().toISOString(),
+    paidAt: null,
+  });
+
+  return res.status(201).json({
+    paymentToken,
+    event: {
+      id: eligibility.event.id,
+      title: eligibility.event.titulo,
+      price: eligibility.event.precio,
+      team,
+    },
+    expiresInMinutes: 15,
+  });
+});
+
+app.post("/api/payments/confirm", authMiddleware, (req, res) => {
+  cleanupExpiredPayments();
+
+  const paymentToken = String(req.body?.paymentToken || "").trim();
+  const payment = pendingPayments.get(paymentToken);
+
+  if (!payment) {
+    return res.status(404).json({ message: "Pago no encontrado o vencido. Intenta nuevamente." });
+  }
+
+  if (payment.jugadorId !== req.jugador.id) {
+    return res.status(403).json({ message: "No puedes confirmar este pago." });
+  }
+
+  if (payment.status === "paid") {
+    return res.json({
+      payment: {
+        id: paymentToken,
+        status: "paid",
+        amount: payment.amount,
+        eventTitle: payment.eventTitle,
+        paidAt: payment.paidAt,
+      },
+    });
+  }
+
+  payment.status = "paid";
+  payment.paidAt = new Date().toISOString();
+  pendingPayments.set(paymentToken, payment);
+
+  return res.json({
+    payment: {
+      id: paymentToken,
+      status: "paid",
+      amount: payment.amount,
+      eventTitle: payment.eventTitle,
+      paidAt: payment.paidAt,
+    },
+  });
+});
+
 app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
   const { eventId } = req.params;
   const team = String(req.body?.team || "").trim().toLowerCase();
-  const season = getTemporadaActual();
-  const event = getEventoById(eventId);
+  const paymentToken = String(req.body?.paymentToken || "").trim();
 
-  if (!season) {
-    return res.status(409).json({ message: "No hay temporada activa. Espera a que inicie la siguiente temporada." });
+  cleanupExpiredPayments();
+
+  if (!paymentToken) {
+    return res.status(400).json({ message: "Debes completar el pago antes de inscribirte." });
   }
 
-  if (!["rojo", "azul"].includes(team)) {
-    return res.status(400).json({ message: "Debes elegir equipo rojo o azul" });
+  const payment = pendingPayments.get(paymentToken);
+  if (!payment) {
+    return res.status(404).json({ message: "Pago no encontrado o vencido. Vuelve a pagar e intenta nuevamente." });
   }
 
-  if (!event) {
-    return res.status(404).json({ message: "Partida no encontrada" });
+  if (payment.jugadorId !== req.jugador.id) {
+    return res.status(403).json({ message: "Este pago no corresponde a tu cuenta." });
   }
 
-  // Validar ventana de inscripción
-  const inscriptionValidation = validateInscriptionWindow(event.fecha);
-  if (!inscriptionValidation.canInscribe) {
-    return res.status(409).json({ message: inscriptionValidation.error });
+  if (payment.eventId !== eventId || payment.team !== team) {
+    return res.status(409).json({ message: "El pago no coincide con la partida o el equipo seleccionado." });
   }
 
-  if (hasReservaActiva(req.jugador.id, eventId)) {
-    return res.status(409).json({ message: "Ya tienes una reserva para esta partida" });
+  if (payment.status !== "paid") {
+    return res.status(409).json({ message: "Debes confirmar el pago antes de inscribirte." });
   }
 
-  const booked = countReservasActivasPorEvento(eventId);
-  if (booked >= event.cupos) {
-    return res.status(409).json({ message: "No quedan cupos disponibles" });
+  const eligibility = validateReservationEligibility(req.jugador.id, eventId, team);
+  if (!eligibility.ok) {
+    return res.status(eligibility.status).json({ message: eligibility.message });
   }
+
+  const event = eligibility.event;
+  const season = eligibility.season;
 
   const reservation = {
     id: uuidv4(),
@@ -303,6 +452,7 @@ app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
   };
 
   createReserva(reservation);
+  pendingPayments.delete(paymentToken);
 
   const freshJugador = getJugadorById(req.jugador.id);
   return res.status(201).json({
@@ -342,6 +492,37 @@ app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMid
 app.get("/api/moderation/reservations", authMiddleware, moderatorMiddleware, (req, res) => {
   const reservations = getReservasParaModeracion().map(mapReservaModeracion);
   return res.json({ reservations });
+});
+
+app.get("/api/moderation/players", authMiddleware, moderatorMiddleware, (req, res) => {
+  const players = getJugadoresRegistrados().map(mapJugadorModeracion);
+  return res.json({ players });
+});
+
+app.post("/api/moderation/reservations/:reservationId/team", authMiddleware, moderatorMiddleware, (req, res) => {
+  const { reservationId } = req.params;
+  const team = String(req.body?.team || "").trim().toLowerCase();
+
+  if (!["rojo", "azul"].includes(team)) {
+    return res.status(400).json({ message: "El equipo debe ser rojo o azul" });
+  }
+
+  const reservation = getReservaById(reservationId);
+  if (!reservation) {
+    return res.status(404).json({ message: "Reserva no encontrada" });
+  }
+
+  if (reservation.estado !== "upcoming") {
+    return res.status(409).json({ message: "Solo puedes cambiar el equipo de reservas pendientes" });
+  }
+
+  const updated = setEquipoReservaModeracion(reservationId, team);
+  if (!updated) {
+    return res.status(409).json({ message: "No fue posible actualizar el equipo" });
+  }
+
+  const freshReservation = getReservasParaModeracion().find((item) => item.id === reservationId);
+  return res.json({ reservation: freshReservation ? mapReservaModeracion(freshReservation) : null });
 });
 
 app.post("/api/moderation/events/:eventId/result", authMiddleware, moderatorMiddleware, (req, res) => {

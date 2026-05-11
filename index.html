@@ -256,7 +256,61 @@
             </article>
           </div>
 
-          <ul id="moderator-reservations-list" class="moderation-events-list"></ul>
+          <div class="moderator-view-tabs">
+            <button class="moderator-view-tab active" data-moderator-view="reservas" type="button">Reservas</button>
+            <button class="moderator-view-tab" data-moderator-view="jugadores" type="button">Jugadores</button>
+            <button class="moderator-view-tab" data-moderator-view="busqueda" type="button">Busqueda</button>
+          </div>
+
+          <div id="moderator-view-reservas">
+            <ul id="moderator-reservations-list" class="moderation-events-list"></ul>
+          </div>
+
+          <div id="moderator-view-jugadores" class="hidden">
+            <ul id="moderator-players-list" class="moderation-players-list"></ul>
+          </div>
+
+          <div id="moderator-view-busqueda" class="hidden">
+            <div class="moderation-search-controls">
+              <label>
+                Buscar
+                <input id="moderator-search-input" type="text" placeholder="Nombre, correo, rol..." />
+              </label>
+              <label>
+                Categoria
+                <select id="moderator-search-category">
+                  <option value="name">Nombre</option>
+                  <option value="email">Correo</option>
+                  <option value="role">Rol</option>
+                  <option value="wins">Victorias</option>
+                  <option value="losses">Derrotas</option>
+                </select>
+              </label>
+              <label>
+                Orden
+                <select id="moderator-search-direction">
+                  <option value="desc">Mayor a menor</option>
+                  <option value="asc">Menor a mayor</option>
+                </select>
+              </label>
+              <label>
+                Jugadores por pagina
+                <select id="moderator-search-page-size">
+                  <option value="5">5</option>
+                  <option value="10" selected>10</option>
+                  <option value="20">20</option>
+                </select>
+              </label>
+            </div>
+
+            <ul id="moderator-search-results" class="moderation-players-list"></ul>
+
+            <div class="moderation-pagination">
+              <button id="moderator-search-prev" class="btn btn-ghost" type="button">Anterior</button>
+              <span id="moderator-search-page-info" class="label">Pagina 1 de 1</span>
+              <button id="moderator-search-next" class="btn btn-ghost" type="button">Siguiente</button>
+            </div>
+          </div>
         </section>
       </section>
 

@@ -5,6 +5,13 @@ const state = {
   currentUser: null,
   events: [],
   moderationReservations: [],
+  moderationPlayers: [],
+  moderatorActiveView: "reservas",
+  moderationSearchText: "",
+  moderationSearchCategory: "name",
+  moderationSearchDirection: "desc",
+  moderationSearchPage: 1,
+  moderationSearchPageSize: 10,
   currentSeason: null,
 };
 
@@ -24,6 +31,19 @@ const refs = {
   moderatorPendingCount: document.getElementById("moderator-pending-count"),
   moderatorPlayedCount: document.getElementById("moderator-played-count"),
   moderatorReservationsList: document.getElementById("moderator-reservations-list"),
+  moderatorPlayersList: document.getElementById("moderator-players-list"),
+  moderatorSearchResults: document.getElementById("moderator-search-results"),
+  moderatorSearchInput: document.getElementById("moderator-search-input"),
+  moderatorSearchCategory: document.getElementById("moderator-search-category"),
+  moderatorSearchDirection: document.getElementById("moderator-search-direction"),
+  moderatorSearchPageSize: document.getElementById("moderator-search-page-size"),
+  moderatorSearchPrev: document.getElementById("moderator-search-prev"),
+  moderatorSearchNext: document.getElementById("moderator-search-next"),
+  moderatorSearchPageInfo: document.getElementById("moderator-search-page-info"),
+  moderatorViewTabs: Array.from(document.querySelectorAll(".moderator-view-tab")),
+  moderatorViewReservas: document.getElementById("moderator-view-reservas"),
+  moderatorViewJugadores: document.getElementById("moderator-view-jugadores"),
+  moderatorViewBusqueda: document.getElementById("moderator-view-busqueda"),
   moderatorRefreshBtn: document.getElementById("moderator-refresh-btn"),
   seasonName: document.getElementById("season-name"),
   seasonStatus: document.getElementById("season-status"),
@@ -253,6 +273,140 @@ function renderDashboard() {
     : "<li class='reservation-item'>Sin actividad aun.</li>";
 }
 
+function renderModerationPlayerItem(reservation, isLocked) {
+  const currentTeam = reservation.team === "azul" ? "azul" : "rojo";
+
+  return `
+    <li class="moderation-player-item">
+      <div class="moderation-player-head">
+        <strong>${reservation.playerName}</strong>
+        <span>${reservation.playerEmail}</span>
+      </div>
+      <div class="moderation-player-actions">
+        <select data-reservation-team-select data-reservation-id="${reservation.id}" ${isLocked ? "disabled" : ""}>
+          <option value="rojo" ${currentTeam === "rojo" ? "selected" : ""}>Equipo Rojo</option>
+          <option value="azul" ${currentTeam === "azul" ? "selected" : ""}>Equipo Azul</option>
+        </select>
+        <button
+          class="btn-team-switch"
+          type="button"
+          data-action="switch-team"
+          data-reservation-id="${reservation.id}"
+          ${isLocked ? "disabled" : ""}
+        >
+          Cambiar
+        </button>
+      </div>
+    </li>
+  `;
+}
+
+function renderModeratorPlayerRow(player) {
+  const roleLabel = player.role === "admin" ? "Admin" : player.role === "moderator" ? "Moderador" : "Jugador";
+  return `
+    <li class="moderation-player-row">
+      <div class="moderation-player-main">
+        <strong>${player.name}</strong>
+        <span>${player.email}</span>
+      </div>
+      <div class="moderation-player-stats">
+        <span class="status-pill status-upcoming">${roleLabel}</span>
+        <span>Partidas: ${player.matchesPlayed}</span>
+        <span>V: ${player.wins} | D: ${player.losses}</span>
+        <span>Activas: ${player.activeReservations}</span>
+      </div>
+    </li>
+  `;
+}
+
+function getModerationSearchResults() {
+  const category = state.moderationSearchCategory;
+  const direction = state.moderationSearchDirection === "asc" ? "asc" : "desc";
+  const text = state.moderationSearchText.trim().toLowerCase();
+  const players = [...state.moderationPlayers];
+
+  const filtered = players.filter((player) => {
+    if (!text) return true;
+
+    if (category === "wins") {
+      return String(player.wins || 0).includes(text);
+    }
+
+    if (category === "losses") {
+      return String(player.losses || 0).includes(text);
+    }
+
+    if (category === "email") {
+      return String(player.email || "").toLowerCase().includes(text);
+    }
+
+    if (category === "role") {
+      return String(player.role || "").toLowerCase().includes(text);
+    }
+
+    return String(player.name || "").toLowerCase().includes(text);
+  });
+
+  const sorted = filtered.sort((left, right) => {
+    let leftValue;
+    let rightValue;
+
+    if (category === "wins") {
+      leftValue = Number(left.wins || 0);
+      rightValue = Number(right.wins || 0);
+    } else if (category === "losses") {
+      leftValue = Number(left.losses || 0);
+      rightValue = Number(right.losses || 0);
+    } else if (category === "email") {
+      leftValue = String(left.email || "").toLowerCase();
+      rightValue = String(right.email || "").toLowerCase();
+    } else if (category === "role") {
+      leftValue = String(left.role || "").toLowerCase();
+      rightValue = String(right.role || "").toLowerCase();
+    } else {
+      leftValue = String(left.name || "").toLowerCase();
+      rightValue = String(right.name || "").toLowerCase();
+    }
+
+    if (leftValue < rightValue) return direction === "asc" ? -1 : 1;
+    if (leftValue > rightValue) return direction === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  return sorted;
+}
+
+function getModerationSearchPageData() {
+  const allResults = getModerationSearchResults();
+  const pageSize = Math.max(1, Number(state.moderationSearchPageSize) || 10);
+  const totalPages = Math.max(1, Math.ceil(allResults.length / pageSize));
+  const currentPage = Math.min(Math.max(1, state.moderationSearchPage), totalPages);
+  const start = (currentPage - 1) * pageSize;
+  const end = start + pageSize;
+
+  state.moderationSearchPage = currentPage;
+
+  return {
+    items: allResults.slice(start, end),
+    totalItems: allResults.length,
+    totalPages,
+    currentPage,
+  };
+}
+
+function switchModeratorView(viewName) {
+  const nextView = ["reservas", "jugadores", "busqueda"].includes(viewName) ? viewName : "reservas";
+  state.moderatorActiveView = nextView;
+
+  refs.moderatorViewTabs.forEach((button) => {
+    button.classList.toggle("active", button.dataset.moderatorView === nextView);
+  });
+
+  refs.moderatorViewReservas?.classList.toggle("hidden", nextView !== "reservas");
+  refs.moderatorViewJugadores?.classList.toggle("hidden", nextView !== "jugadores");
+  refs.moderatorViewBusqueda?.classList.toggle("hidden", nextView !== "busqueda");
+}
+
 function renderModeratorPanel() {
   const user = state.currentUser;
   const isModerator = isStaffRole(user?.role);
@@ -262,6 +416,14 @@ function renderModeratorPanel() {
     refs.moderatorPendingCount.textContent = "0";
     refs.moderatorPlayedCount.textContent = "0";
     refs.moderatorReservationsList.innerHTML = "";
+    refs.moderatorPlayersList.innerHTML = "";
+    refs.moderatorSearchResults.innerHTML = "";
+    if (refs.moderatorSearchPageInfo) {
+      refs.moderatorSearchPageInfo.textContent = "Pagina 1 de 1";
+    }
+    if (refs.moderatorSearchPrev) refs.moderatorSearchPrev.disabled = true;
+    if (refs.moderatorSearchNext) refs.moderatorSearchNext.disabled = true;
+    switchModeratorView("reservas");
     return;
   }
 
@@ -344,14 +506,7 @@ function renderModeratorPanel() {
                     ${
                       redTeam.length
                         ? redTeam
-                            .map(
-                              (reservation) => `
-                                <li class="moderation-player-item">
-                                  <strong>${reservation.playerName}</strong>
-                                  <span>${reservation.playerEmail}</span>
-                                </li>
-                              `
-                            )
+                            .map((reservation) => renderModerationPlayerItem(reservation, !hasPending))
                             .join("")
                         : "<li class='moderation-player-item empty'>Sin inscritos</li>"
                     }
@@ -364,14 +519,7 @@ function renderModeratorPanel() {
                     ${
                       blueTeam.length
                         ? blueTeam
-                            .map(
-                              (reservation) => `
-                                <li class="moderation-player-item">
-                                  <strong>${reservation.playerName}</strong>
-                                  <span>${reservation.playerEmail}</span>
-                                </li>
-                              `
-                            )
+                            .map((reservation) => renderModerationPlayerItem(reservation, !hasPending))
                             .join("")
                         : "<li class='moderation-player-item empty'>Sin inscritos</li>"
                     }
@@ -398,6 +546,23 @@ function renderModeratorPanel() {
         })
         .join("")
     : "<li class='reservation-item'>No hay reservas para moderar.</li>";
+
+  refs.moderatorPlayersList.innerHTML = state.moderationPlayers.length
+    ? state.moderationPlayers.map(renderModeratorPlayerRow).join("")
+    : "<li class='reservation-item'>No hay jugadores registrados.</li>";
+
+  const pageData = getModerationSearchPageData();
+  refs.moderatorSearchResults.innerHTML = pageData.items.length
+    ? pageData.items.map(renderModeratorPlayerRow).join("")
+    : "<li class='reservation-item'>No hay resultados para esa busqueda.</li>";
+
+  if (refs.moderatorSearchPageInfo) {
+    refs.moderatorSearchPageInfo.textContent = `Pagina ${pageData.currentPage} de ${pageData.totalPages} | ${pageData.totalItems} jugadores`;
+  }
+  if (refs.moderatorSearchPrev) refs.moderatorSearchPrev.disabled = pageData.currentPage <= 1;
+  if (refs.moderatorSearchNext) refs.moderatorSearchNext.disabled = pageData.currentPage >= pageData.totalPages;
+
+  switchModeratorView(state.moderatorActiveView);
 }
 
 function renderEvents() {
@@ -418,7 +583,7 @@ function renderEvents() {
       const selectedTeam = currentReservation?.team || "rojo";
       const teamDisabled = !currentUser || !seasonActive || !event.canInscribe || booked >= event.slots || alreadyJoined;
 
-      let buttonLabel = "Inscribirme";
+      let buttonLabel = "Inscribirme y pagar";
       if (!currentUser) buttonLabel = "Inicia sesion";
       if (!seasonActive) buttonLabel = "Temporada cerrada";
       if (!event.canInscribe) buttonLabel = "Abre lunes 00:00";
@@ -517,6 +682,16 @@ async function refreshModerationReservations() {
   state.moderationReservations = data.reservations || [];
 }
 
+async function refreshModerationPlayers() {
+  if (!isStaffRole(state.currentUser?.role)) {
+    state.moderationPlayers = [];
+    return;
+  }
+
+  const data = await apiRequest("/api/moderation/players");
+  state.moderationPlayers = data.players || [];
+}
+
 async function registerUser(formData) {
   const name = formData.get("name")?.toString().trim();
   const email = formData.get("email")?.toString().trim().toLowerCase();
@@ -563,6 +738,7 @@ async function loginUser(formData) {
     showMessage("Sesion iniciada. Revisa tus partidas en el panel.");
     await refreshEvents();
     await refreshModerationReservations();
+    await refreshModerationPlayers();
     render();
   } catch (error) {
     showMessage(error.message, true);
@@ -581,6 +757,7 @@ async function logoutUser() {
   saveToken(null);
   state.currentUser = null;
   state.moderationReservations = [];
+  state.moderationPlayers = [];
   state.currentSeason = null;
   showMessage("Sesion cerrada.");
   await refreshEvents();
@@ -618,10 +795,27 @@ async function submitWinningTeam(eventId, winningTeam) {
     });
 
     await refreshModerationReservations();
+    await refreshModerationPlayers();
     await refreshEvents();
     await refreshCurrentUser();
     render();
     showMessage(`Ganador registrado para ${data.event.title}: ${getTeamLabel(data.event.winningTeam)}.`);
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function updateReservationTeam(reservationId, team) {
+  try {
+    await apiRequest(`/api/moderation/reservations/${reservationId}/team`, {
+      method: "POST",
+      body: JSON.stringify({ team }),
+    });
+
+    await refreshModerationReservations();
+    await refreshCurrentUser();
+    render();
+    showMessage(`Equipo actualizado: ${getTeamLabel(team)}.`);
   } catch (error) {
     showMessage(error.message, true);
   }
@@ -632,6 +826,7 @@ async function endSeason() {
     await apiRequest("/api/moderation/seasons/end", { method: "POST" });
     await refreshCurrentSeason();
     await refreshModerationReservations();
+    await refreshModerationPlayers();
     await refreshEvents();
     await refreshCurrentUser();
     render();
@@ -646,6 +841,7 @@ async function startSeason() {
     const data = await apiRequest("/api/moderation/seasons/start", { method: "POST" });
     await refreshCurrentSeason();
     await refreshModerationReservations();
+    await refreshModerationPlayers();
     await refreshEvents();
     await refreshCurrentUser();
     render();
@@ -678,7 +874,7 @@ function setupEvents() {
     await logoutUser();
   });
 
-  refs.eventsGrid.addEventListener("click", async (event) => {
+  refs.eventsGrid.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) return;
 
@@ -687,18 +883,68 @@ function setupEvents() {
 
     const eventCard = target.closest(".event-card");
     const teamSelect = eventCard?.querySelector("select[data-team-select]");
-    const team = teamSelect instanceof HTMLSelectElement ? teamSelect.value : "";
+    const team = teamSelect instanceof HTMLSelectElement ? teamSelect.value : "rojo";
 
-    await joinEvent(eventId, team);
+    const params = new URLSearchParams({ eventId, team });
+    window.location.href = `/inscripcion.html?${params.toString()}`;
   });
 
   refs.moderatorRefreshBtn.addEventListener("click", async () => {
     await refreshCurrentUser();
     await refreshCurrentSeason();
     await refreshModerationReservations();
+    await refreshModerationPlayers();
     await refreshEvents();
     render();
     showMessage("Panel de moderacion actualizado.");
+  });
+
+  refs.moderatorViewTabs.forEach((button) => {
+    button.addEventListener("click", () => {
+      switchModeratorView(button.dataset.moderatorView);
+    });
+  });
+
+  refs.moderatorSearchInput?.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    state.moderationSearchText = target.value;
+    state.moderationSearchPage = 1;
+    renderModeratorPanel();
+  });
+
+  refs.moderatorSearchCategory?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    state.moderationSearchCategory = target.value;
+    state.moderationSearchPage = 1;
+    renderModeratorPanel();
+  });
+
+  refs.moderatorSearchDirection?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    state.moderationSearchDirection = target.value;
+    state.moderationSearchPage = 1;
+    renderModeratorPanel();
+  });
+
+  refs.moderatorSearchPageSize?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    state.moderationSearchPageSize = Math.max(1, Number(target.value) || 10);
+    state.moderationSearchPage = 1;
+    renderModeratorPanel();
+  });
+
+  refs.moderatorSearchPrev?.addEventListener("click", () => {
+    state.moderationSearchPage = Math.max(1, state.moderationSearchPage - 1);
+    renderModeratorPanel();
+  });
+
+  refs.moderatorSearchNext?.addEventListener("click", () => {
+    state.moderationSearchPage += 1;
+    renderModeratorPanel();
   });
 
   refs.seasonEndBtn.addEventListener("click", async () => {
@@ -717,6 +963,23 @@ function setupEvents() {
   refs.moderatorReservationsList.addEventListener("click", async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) return;
+
+    if (target.dataset.action === "switch-team") {
+      const reservationId = target.dataset.reservationId;
+      if (!reservationId) return;
+
+      const select = refs.moderatorReservationsList.querySelector(
+        `select[data-reservation-team-select][data-reservation-id="${reservationId}"]`
+      );
+      const selectedTeam = select instanceof HTMLSelectElement ? select.value : "";
+      if (!["rojo", "azul"].includes(selectedTeam)) {
+        showMessage("Selecciona un equipo valido para continuar.", true);
+        return;
+      }
+
+      await updateReservationTeam(reservationId, selectedTeam);
+      return;
+    }
 
     const eventId = target.dataset.eventId;
     const winningTeam = target.dataset.winningTeam;
@@ -754,13 +1017,18 @@ function render() {
 }
 
 async function init() {
-  switchPageTab("inicio");
+  const urlTab = new URLSearchParams(window.location.search).get("tab");
+  const allowedTabs = ["inicio", "partidas", "moderar", "contacto"];
+  const initialTab = allowedTabs.includes(urlTab) ? urlTab : "inicio";
+
+  switchPageTab(initialTab);
   setupEvents();
 
   await refreshEvents();
   await refreshCurrentUser();
   await refreshCurrentSeason();
   await refreshModerationReservations();
+  await refreshModerationPlayers();
 
   render();
 }
