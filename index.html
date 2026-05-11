@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CQB Factory | Vive el Airsoft</title>
+    <meta
+      name="description"
+      content="Inscribete a partidas CQB de airsoft, crea tu cuenta y lleva tu progreso en CQB Factory."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <header class="site-header">
+      <div class="brand">CQB FACTORY</div>
+      <nav class="top-tabs">
+        <button class="top-tab active" data-page-tab="inicio">Inicio</button>
+        <button class="top-tab" data-page-tab="partidas">Partidas</button>
+        <button class="top-tab" data-page-tab="contacto">Contacto</button>
+      </nav>
+      <button id="header-cta" class="btn btn-primary">Crear cuenta</button>
+    </header>
+
+    <main>
+      <section id="tab-inicio" class="page-tab-panel">
+        <section class="hero">
+          <p class="eyebrow">Centro de Operaciones CQB</p>
+          <h1>La experiencia CQB mas cerca de ti</h1>
+          <p class="hero-copy">
+            Somos una comunidad enfocada 100% en partidas CQB. Reserva tu lugar,
+            crea tu cuenta y registra tu progreso para escalar de recluta a operador.
+          </p>
+          <div class="hero-actions">
+            <button id="hero-register" class="btn btn-primary">Abrir mi cuenta</button>
+            <button id="hero-login" class="btn btn-ghost">Ya soy operador</button>
+          </div>
+          <div class="hero-metrics">
+            <article>
+              <span class="value">+240</span>
+              <span class="label">Jugadores activos</span>
+            </article>
+            <article>
+              <span id="events-month-value" class="value">0</span>
+              <span id="events-month-label" class="label">Eventos este mes</span>
+            </article>
+            <article>
+              <span class="value">4.9/5</span>
+              <span class="label">Valoracion media</span>
+            </article>
+          </div>
+        </section>
+
+        <section class="section intro-grid">
+          <article class="intro-card intro-main">
+            <p class="eyebrow">Descripcion CQB</p>
+            <h2>Combate cercano, estrategia real y ritmo intenso</h2>
+            <p>
+              Las partidas CQB (Close Quarters Battle) se juegan en distancias cortas,
+              con escenarios cerrados, reaccion rapida y coordinacion constante del equipo.
+            </p>
+            <ul class="intro-list">
+              <li>Actividad fija todos los viernes, sabados y domingos</li>
+              <li>Partidas por objetivos: Domination, Team Deathmatch y Bomb Defuse</li>
+              <li>Seguridad obligatoria y arbitraje en cada encuentro</li>
+            </ul>
+          </article>
+
+          <article class="intro-card intro-photo photo-a">
+            <div class="photo-overlay">
+              <h3>Viernes</h3>
+              <p>Sesion nocturna CQB para escuadras y entrenamiento tactico.</p>
+            </div>
+          </article>
+
+          <article class="intro-card intro-photo photo-b">
+            <div class="photo-overlay">
+              <h3>Sabado y Domingo</h3>
+              <p>Jornadas completas para nuevos jugadores y operadores avanzados.</p>
+            </div>
+          </article>
+        </section>
+
+        <section class="section brief-strip">
+          <article>
+            <h3>Tipos de partidas</h3>
+            <p>Publicas, por niveles, privadas para equipos y eventos especiales.</p>
+          </article>
+          <article>
+            <h3>Rental disponible</h3>
+            <p>Contamos con renta de replica, careta y proteccion para que juegues desde tu primera visita.</p>
+          </article>
+          <article>
+            <h3>Arriendo para eventos</h3>
+            <p>Reserva la cancha para eventos privados, cumpleanos, empresas y entrenamientos de equipo.</p>
+          </article>
+        </section>
+      </section>
+
+      <section id="tab-partidas" class="page-tab-panel hidden">
+        <section id="partidas" class="section">
+          <div class="section-head">
+            <p class="eyebrow">Calendario</p>
+            <h2>Proximas partidas</h2>
+          </div>
+          <p class="hero-copy">
+            Rental disponible en cada jornada. Tambien puedes arrendar la cancha completa para eventos privados.
+          </p>
+          <div id="events-grid" class="events-grid"></div>
+        </section>
+
+        <section id="cuenta" class="section account-layout">
+          <div class="auth-box">
+            <div class="section-head compact">
+              <p class="eyebrow">Tu perfil</p>
+              <h2>Cuenta de jugador</h2>
+            </div>
+
+            <div id="auth-guest-view">
+              <div class="tabs">
+                <button class="tab active" data-tab="register">Crear cuenta</button>
+                <button class="tab" data-tab="login">Iniciar sesion</button>
+              </div>
+
+              <form id="register-form" class="auth-form">
+                <label>
+                  Nombre completo
+                  <input type="text" name="name" required minlength="3" />
+                </label>
+                <label>
+                  Correo
+                  <input type="email" name="email" required />
+                </label>
+                <label>
+                  Contrasena
+                  <input type="password" name="password" required minlength="6" />
+                </label>
+                <button class="btn btn-primary" type="submit">Crear mi cuenta</button>
+              </form>
+
+              <form id="login-form" class="auth-form hidden">
+                <label>
+                  Correo
+                  <input type="email" name="email" required />
+                </label>
+                <label>
+                  Contrasena
+                  <input type="password" name="password" required />
+                </label>
+                <button class="btn btn-primary" type="submit">Entrar a mi cuenta</button>
+              </form>
+            </div>
+
+            <div id="auth-user-view" class="hidden">
+              <p id="welcome-text" class="welcome-text"></p>
+              <button id="logout-btn" class="btn btn-ghost">Cerrar sesion</button>
+            </div>
+
+            <p id="auth-message" class="message"></p>
+          </div>
+
+          <div class="dashboard-box">
+            <div class="section-head compact">
+              <p class="eyebrow">Panel</p>
+              <h2>Tu progreso</h2>
+            </div>
+
+            <div class="stats-grid">
+              <article>
+                <span id="stat-played" class="value">0</span>
+                <span class="label">Partidas jugadas</span>
+              </article>
+              <article>
+                <span id="stat-upcoming" class="value">0</span>
+                <span class="label">Reservas activas</span>
+              </article>
+              <article>
+                <span id="stat-wins" class="value">0</span>
+                <span class="label">Victorias</span>
+              </article>
+              <article>
+                <span id="stat-losses" class="value">0</span>
+                <span class="label">Derrotas</span>
+              </article>
+              <article>
+                <span id="stat-ratio" class="value">0.00</span>
+                <span class="label">Ratio V/D</span>
+              </article>
+              <article>
+                <span id="stat-badge" class="value small">Recluta</span>
+                <span class="label">Rango</span>
+              </article>
+            </div>
+
+            <div class="next-match">
+              <h3>Proxima partida</h3>
+              <p id="next-match-text">Inicia sesion para ver tu agenda.</p>
+            </div>
+
+            <div>
+              <h3>Mis reservas</h3>
+              <ul id="reservations-list" class="reservations-list"></ul>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="tab-contacto" class="page-tab-panel hidden">
+        <section id="contacto" class="section contact-layout">
+          <article class="cta-strip">
+            <p class="eyebrow">Contacto operativo</p>
+            <h2>Arma tu equipo y reserva hoy</h2>
+            <p>
+              Atencion por WhatsApp, rental disponible, eventos privados y torneos corporativos.
+              Respondemos en menos de 15 minutos en horario laboral.
+            </p>
+            <a class="btn btn-primary" href="https://wa.me/56987575315" target="_blank" rel="noreferrer"
+              >Hablar por WhatsApp</a
+            >
+          </article>
+
+          <article class="contact-card">
+            <h3>Base CQB Factory</h3>
+            <p><strong>Horarios de partidas (AM / PM)</strong></p>
+            <p>Viernes AM: 10:00 a 13:00 | Viernes PM: 18:00 a 22:00</p>
+            <p>Sabado AM: 09:30 a 13:30 | Sabado PM: 16:00 a 21:00</p>
+            <p>Domingo AM: 09:00 a 12:30 | Domingo PM: 15:30 a 19:30</p>
+            <p>Telefono: +56987575315</p>
+            <p>Email: cqbfactoryspa@gmail.com</p>
+            <p>Servicios: rental completo y arriendo de cancha para eventos privados</p>
+            <p>Direccion: Zona industrial, nave 12, Ciudad Airsoft</p>
+
+            <div class="map-block">
+              <p><strong>Ubicacion referencial (preview)</strong></p>
+              <iframe
+                title="Mapa de referencia CQB Factory"
+                src="https://www.google.com/maps?q=Parque+OHiggins+Santiago&output=embed"
+                loading="lazy"
+                referrerpolicy="no-referrer-when-downgrade"
+                allowfullscreen
+              ></iframe>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>CQB Factory © 2026</p>
+      <p>Airsoft seguro. Equipo obligatorio. Juego limpio.</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
