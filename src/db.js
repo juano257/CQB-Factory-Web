@@ -33,7 +33,8 @@ db.exec(`
     fecha TEXT NOT NULL,
     nivel TEXT NOT NULL,
     precio TEXT NOT NULL,
-    cupos INTEGER NOT NULL
+    cupos INTEGER NOT NULL,
+    inscription_start TEXT
   );
 
   CREATE TABLE IF NOT EXISTS temporadas (
@@ -80,10 +81,18 @@ if (!hasTemporadaIdColumn) {
   db.exec("ALTER TABLE reservas ADD COLUMN temporada_id INTEGER");
 }
 
+const eventosColumns = db.prepare("PRAGMA table_info(eventos)").all();
+const hasInscriptionStartColumn = eventosColumns.some((column) => column.name === "inscription_start");
+
+if (!hasInscriptionStartColumn) {
+  db.exec("ALTER TABLE eventos ADD COLUMN inscription_start TEXT");
+}
+
 const moderatorEmails = ["juan.erazo.gajardo@gmail.com"];
+const moderatorEmailSet = new Set(moderatorEmails.map((email) => String(email).trim().toLowerCase()));
 
 const promoteModerator = db.prepare(
-  "UPDATE jugadores SET rol = 'moderator' WHERE correo = ? AND rol != 'moderator'"
+  "UPDATE jugadores SET rol = 'moderator' WHERE LOWER(TRIM(correo)) = ? AND rol != 'moderator'"
 );
 
 const promoteModeratorsTx = db.transaction((emails) => {
@@ -93,6 +102,17 @@ const promoteModeratorsTx = db.transaction((emails) => {
 });
 
 promoteModeratorsTx(moderatorEmails);
+
+function isModeratorEmail(correo) {
+  return moderatorEmailSet.has(String(correo || "").trim().toLowerCase());
+}
+
+function ensureModeratorRoleForEmail(correo) {
+  const normalizedEmail = String(correo || "").trim().toLowerCase();
+  if (!isModeratorEmail(normalizedEmail)) return 0;
+  const result = promoteModerator.run(normalizedEmail);
+  return result.changes || 0;
+}
 
 function createSeason(numero) {
   const now = new Date().toISOString();
@@ -123,11 +143,55 @@ if (!hasTemporadaIdColumn && activeTemporada) {
   db.prepare("UPDATE reservas SET temporada_id = ? WHERE temporada_id IS NULL").run(activeTemporada.id);
 }
 
-const seedEvents = [
+// Funciones helper para gestionar fechas de inscripción
+function getMondayOfWeek(dateString) {
+  const date = new Date(dateString);
+  const dayOfWeek = date.getDay();
+  // Calcular diferencia al lunes (1)
+  // Domingo (0) -> 6 días atrás, Lunes (1) -> 0 días, Martes (2) -> 1 día atrás, etc
+  const daysToSubtract = (dayOfWeek + 6) % 7;
+  
+  const monday = new Date(date);
+  monday.setDate(monday.getDate() - daysToSubtract);
+  monday.setHours(0, 0, 0, 0);
+  return monday.toISOString();
+}
+
+function getSundayOfWeek(dateString) {
+  const date = new Date(dateString);
+  const dayOfWeek = date.getDay();
+  // Calcular diferencia al domingo (0)
+  let daysToAdd = (7 - dayOfWeek) % 7;
+  if (dayOfWeek === 0) daysToAdd = 0; // ya es domingo
+  
+  const sunday = new Date(date);
+  sunday.setDate(sunday.getDate() + daysToAdd);
+  sunday.setHours(23, 59, 59, 999);
+  return sunday.toISOString();
+}
+
+function validateInscriptionWindow(eventDate) {
+  const now = new Date();
+  const monday = new Date(getMondayOfWeek(eventDate));
+  const sunday = new Date(getSundayOfWeek(eventDate));
+  
+  return {
+    canInscribe: now >= monday && now <= sunday,
+    inscriptionStart: monday.toISOString(),
+    inscriptionEnd: sunday.toISOString(),
+    error: now < monday ? "La inscripcion aun no ha abierto. Se abre el lunes a las 00:00 de esta semana." : 
+           now > sunday ? "La inscripcion ha cerrado. Solo se permite inscribirse de lunes 00:00 a domingo 23:59." : null
+  };
+}
+
+
+const seedEventTemplates = [
   {
     id: "evt-1",
     titulo: "Operacion Tactica Nocturna",
-    fecha: "2026-05-22T20:00:00",
+    weekday: 5,
+    hour: 20,
+    minute: 0,
     nivel: "Intermedio",
     precio: "$14",
     cupos: 40,
@@ -135,7 +199,9 @@ const seedEvents = [
   {
     id: "evt-2",
     titulo: "CQB Sabado | Turno Manana",
-    fecha: "2026-05-23T10:30:00",
+    weekday: 6,
+    hour: 10,
+    minute: 30,
     nivel: "Principiante",
     precio: "$10",
     cupos: 40,
@@ -143,7 +209,9 @@ const seedEvents = [
   {
     id: "evt-3",
     titulo: "CQB Sabado | Turno Tarde",
-    fecha: "2026-05-23T17:00:00",
+    weekday: 6,
+    hour: 17,
+    minute: 0,
     nivel: "Intermedio",
     precio: "$12",
     cupos: 40,
@@ -151,7 +219,9 @@ const seedEvents = [
   {
     id: "evt-4",
     titulo: "CQB Domingo | Turno Manana",
-    fecha: "2026-05-24T11:00:00",
+    weekday: 7,
+    hour: 11,
+    minute: 0,
     nivel: "Principiante",
     precio: "$10",
     cupos: 40,
@@ -159,20 +229,97 @@ const seedEvents = [
   {
     id: "evt-5",
     titulo: "Liga Squad Domingo | Turno Tarde",
-    fecha: "2026-05-24T16:30:00",
+    weekday: 7,
+    hour: 16,
+    minute: 30,
     nivel: "Avanzado",
     precio: "$18",
     cupos: 40,
   },
 ];
 
+function toLocalIsoWithoutTimezone(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+}
+
+function getCurrentWeekMondayDate() {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const daysToSubtract = (dayOfWeek + 6) % 7;
+
+  const monday = new Date(now);
+  monday.setDate(monday.getDate() - daysToSubtract);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function buildSeedEventsForCurrentWeek() {
+  const monday = getCurrentWeekMondayDate();
+
+  return seedEventTemplates.map((template) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + (template.weekday - 1));
+    date.setHours(template.hour, template.minute, 0, 0);
+
+    const fecha = toLocalIsoWithoutTimezone(date);
+
+    return {
+      id: template.id,
+      titulo: template.titulo,
+      fecha,
+      nivel: template.nivel,
+      precio: template.precio,
+      cupos: template.cupos,
+      inscription_start: getMondayOfWeek(fecha),
+    };
+  });
+}
+
 const countEvents = db.prepare("SELECT COUNT(*) AS total FROM eventos").get().total;
 if (countEvents === 0) {
+  const seedEvents = buildSeedEventsForCurrentWeek();
   const insertEvent = db.prepare(
-    "INSERT INTO eventos (id, titulo, fecha, nivel, precio, cupos) VALUES (@id, @titulo, @fecha, @nivel, @precio, @cupos)"
+    "INSERT INTO eventos (id, titulo, fecha, nivel, precio, cupos, inscription_start) VALUES (@id, @titulo, @fecha, @nivel, @precio, @cupos, @inscription_start)"
   );
   const seedTx = db.transaction((rows) => rows.forEach((row) => insertEvent.run(row)));
   seedTx(seedEvents);
+}
+
+if (countEvents > 0) {
+  const reservationCount = db.prepare("SELECT COUNT(*) AS total FROM reservas").get().total;
+  if (reservationCount === 0) {
+    const defaultIds = seedEventTemplates.map((event) => event.id);
+    const placeholders = defaultIds.map(() => "?").join(", ");
+    const existingDefaultEvents = db
+      .prepare(`SELECT id, fecha FROM eventos WHERE id IN (${placeholders})`)
+      .all(...defaultIds);
+
+    if (existingDefaultEvents.length === defaultIds.length) {
+      const currentWeekSeed = buildSeedEventsForCurrentWeek();
+      const currentWeekSeedById = new Map(currentWeekSeed.map((event) => [event.id, event]));
+
+      const needsSync = existingDefaultEvents.some((event) => {
+        const expected = currentWeekSeedById.get(event.id);
+        return expected && event.fecha !== expected.fecha;
+      });
+
+      if (needsSync) {
+        const updateEvent = db.prepare(
+          `UPDATE eventos
+           SET titulo = @titulo,
+               fecha = @fecha,
+               nivel = @nivel,
+               precio = @precio,
+               cupos = @cupos,
+               inscription_start = @inscription_start
+           WHERE id = @id`
+        );
+        const syncTx = db.transaction((rows) => rows.forEach((row) => updateEvent.run(row)));
+        syncTx(currentWeekSeed);
+      }
+    }
+  }
 }
 
 function getJugadorByCorreo(correo) {
@@ -443,4 +590,9 @@ module.exports = {
   iniciarNuevaTemporada,
   setResultadoReserva,
   setResultadosEventoPorEquipo,
+  getMondayOfWeek,
+  getSundayOfWeek,
+  validateInscriptionWindow,
+  isModeratorEmail,
+  ensureModeratorRoleForEmail,
 };

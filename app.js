@@ -414,13 +414,14 @@ function renderEvents() {
         ) || null;
       const alreadyJoined = Boolean(currentReservation);
 
-      const disabled = !currentUser || !seasonActive || booked >= event.slots || alreadyJoined;
+      const disabled = !currentUser || !seasonActive || !event.canInscribe || booked >= event.slots || alreadyJoined;
       const selectedTeam = currentReservation?.team || "rojo";
-      const teamDisabled = !currentUser || !seasonActive || booked >= event.slots || alreadyJoined;
+      const teamDisabled = !currentUser || !seasonActive || !event.canInscribe || booked >= event.slots || alreadyJoined;
 
       let buttonLabel = "Inscribirme";
       if (!currentUser) buttonLabel = "Inicia sesion";
       if (!seasonActive) buttonLabel = "Temporada cerrada";
+      if (!event.canInscribe) buttonLabel = "Abre lunes 00:00";
       if (alreadyJoined) buttonLabel = "Ya inscrito";
       if (booked >= event.slots) buttonLabel = "Cupos completos";
 
@@ -701,7 +702,12 @@ function setupEvents() {
   });
 
   refs.seasonEndBtn.addEventListener("click", async () => {
-    await endSeason();
+    const confirmed = window.confirm(
+      "⚠️ Esto cerrará la temporada actual y reiniciará todas las estadísticas de los jugadores.\n\n¿Estás seguro de que quieres terminar la temporada?"
+    );
+    if (confirmed) {
+      await endSeason();
+    }
   });
 
   refs.seasonStartBtn.addEventListener("click", async () => {

@@ -217,6 +217,12 @@ h1 {
   color: var(--ink);
 }
 
+.btn-danger {
+  background: linear-gradient(120deg, #cc2936 0%, #9b1f2a 100%);
+  color: #fff;
+  box-shadow: 0 12px 25px rgba(204, 41, 54, 0.22);
+}
+
 .hero-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -24,6 +24,9 @@ const {
   iniciarNuevaTemporada,
   setResultadoReserva,
   setResultadosEventoPorEquipo,
+  validateInscriptionWindow,
+  isModeratorEmail,
+  ensureModeratorRoleForEmail,
 } = require("./db");
 
 function isStaffRole(role) {
@@ -185,7 +188,7 @@ app.post("/api/auth/register", (req, res) => {
     nombre: String(name).trim(),
     correo: normalizedEmail,
     contrasena: String(password),
-    rol: "user",
+    rol: isModeratorEmail(normalizedEmail) ? "moderator" : "user",
     victorias: 0,
     derrotas: 0,
     partidas_jugadas: 0,
@@ -194,10 +197,12 @@ app.post("/api/auth/register", (req, res) => {
   };
 
   createJugador(newJugador);
+  ensureModeratorRoleForEmail(normalizedEmail);
+  const createdJugador = getJugadorById(newJugador.id);
   const token = uuidv4();
   upsertSesion(token, newJugador.id);
 
-  return res.status(201).json({ token, user: buildProfile(newJugador) });
+  return res.status(201).json({ token, user: buildProfile(createdJugador) });
 });
 
 app.post("/api/auth/login", (req, res) => {
@@ -209,9 +214,12 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ message: "Credenciales invalidas" });
   }
 
+  ensureModeratorRoleForEmail(normalizedEmail);
+  const freshJugador = getJugadorById(jugador.id);
+
   const token = uuidv4();
-  upsertSesion(token, jugador.id);
-  return res.json({ token, user: buildProfile(jugador) });
+  upsertSesion(token, freshJugador.id);
+  return res.json({ token, user: buildProfile(freshJugador) });
 });
 
 app.post("/api/auth/logout", authMiddleware, (req, res) => {
@@ -225,15 +233,22 @@ app.get("/api/me", authMiddleware, (req, res) => {
 });
 
 app.get("/api/events", (req, res) => {
-  const events = getEventosConDisponibilidad().map((event) => ({
-    id: event.id,
-    title: event.titulo,
-    date: event.fecha,
-    level: event.nivel,
-    price: event.precio,
-    slots: event.cupos,
-    availableSlots: event.cupos_disponibles,
-  }));
+  const events = getEventosConDisponibilidad().map((event) => {
+    const inscriptionValidation = validateInscriptionWindow(event.fecha);
+    return {
+      id: event.id,
+      title: event.titulo,
+      date: event.fecha,
+      level: event.nivel,
+      price: event.precio,
+      slots: event.cupos,
+      availableSlots: event.cupos_disponibles,
+      canInscribe: inscriptionValidation.canInscribe,
+      inscriptionStart: inscriptionValidation.inscriptionStart,
+      inscriptionEnd: inscriptionValidation.inscriptionEnd,
+      inscriptionMessage: inscriptionValidation.error,
+    };
+  });
 
   return res.json({ events });
 });
@@ -258,6 +273,12 @@ app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
 
   if (!event) {
     return res.status(404).json({ message: "Partida no encontrada" });
+  }
+
+  // Validar ventana de inscripción
+  const inscriptionValidation = validateInscriptionWindow(event.fecha);
+  if (!inscriptionValidation.canInscribe) {
+    return res.status(409).json({ message: inscriptionValidation.error });
   }
 
   if (hasReservaActiva(req.jugador.id, eventId)) {
