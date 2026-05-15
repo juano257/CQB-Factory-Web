@@ -1,0 +1,9 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/CPANEL_USER/cqbfactory-app
+    - /bin/mkdir -p "$DEPLOYPATH"
+    - /bin/rsync -az --delete --exclude '.git' --exclude '.cpanel.yml' --exclude 'node_modules' --exclude '.env' --exclude '.env.*' ./ "$DEPLOYPATH/"
+    - cd "$DEPLOYPATH" && /usr/bin/npm install --omit=dev
+    - /bin/mkdir -p "$DEPLOYPATH/tmp"
+    - /bin/date > "$DEPLOYPATH/tmp/restart.txt"

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inscripcion y Pago | CQB Factory</title>
+    <meta
+      name="description"
+      content="Completa tu inscripcion y pago para asegurar tu cupo en una partida CQB Factory."
+    />
+    <link rel="canonical" href="https://cqbfactory.com/inscripcion.html" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <header class="site-header">
+      <div class="brand">CQB FACTORY</div>
+      <nav class="top-tabs">
+        <a class="top-tab-link" href="/">Volver al inicio</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="section payment-layout">
+        <article class="payment-summary-card">
+          <p class="eyebrow">Paso 1</p>
+          <h1 class="payment-title">Confirma tu inscripcion</h1>
+          <p class="hero-copy">Antes de reservar tu lugar debes completar el pago de la entrada.</p>
+
+          <div id="event-summary" class="payment-summary-grid hidden">
+            <div>
+              <span class="label">Partida</span>
+              <strong id="summary-title">-</strong>
+            </div>
+            <div>
+              <span class="label">Fecha</span>
+              <strong id="summary-date">-</strong>
+            </div>
+            <div>
+              <span class="label">Equipo</span>
+              <strong id="summary-team">-</strong>
+            </div>
+            <div>
+              <span class="label">Total a pagar</span>
+              <strong id="summary-price">-</strong>
+            </div>
+          </div>
+
+          <div id="payment-alert" class="payment-alert hidden"></div>
+        </article>
+
+        <article class="payment-form-card">
+          <p class="eyebrow">Paso 2</p>
+          <h2>Paga con proveedor externo</h2>
+
+          <form id="payment-form" class="auth-form">
+            <div class="payment-provider-box">
+              <p>
+                El cobro se realizara con una plataforma de pago externa. Por ahora el flujo esta
+                preparado para la integracion y no solicita datos de tarjeta en este sitio.
+              </p>
+              <p class="label">Flujo actual temporal: iniciar pago externo y luego confirmar.</p>
+            </div>
+
+            <div class="payment-actions">
+              <button id="start-external-pay-btn" class="btn btn-ghost" type="button">
+                Iniciar pago externo
+              </button>
+              <button id="confirm-pay-btn" class="btn btn-primary" type="submit" disabled>
+                Ya pague, confirmar inscripcion
+              </button>
+            </div>
+          </form>
+
+          <p id="payment-message" class="message"></p>
+        </article>
+      </section>
+    </main>
+
+    <script src="inscripcion.js"></script>
+  </body>
+</html>

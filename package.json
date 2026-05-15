@@ -1,0 +1,26 @@
+{
+  "name": "cqb-factory-web",
+  "version": "1.0.0",
+  "description": "CQB Factory web + backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --dns-result-order=ipv4first server.js",
+    "dev": "node --dns-result-order=ipv4first --watch server.js",
+    "db:check": "node -e \"require('dotenv').config(); const { initDb } = require('./src/db'); initDb().then(() => { console.log('DB OK'); process.exit(0); }).catch((err) => { console.error('DB FAIL:', err.message); process.exit(1); });\""
+  },
+  "keywords": [
+    "airsoft",
+    "cqb",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "nodemailer": "^8.0.7",
+    "pg": "^8.20.0",
+    "uuid": "^11.1.0"
+  }
+}
