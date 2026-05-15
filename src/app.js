@@ -79,6 +79,10 @@ function mapJugadorModeracion(jugador) {
   };
 }
 
+function asyncHandler(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
 function mapTemporada(temporada) {
   if (!temporada) return null;
 
@@ -92,7 +96,7 @@ function mapTemporada(temporada) {
   };
 }
 
-function sanitizeJugador(jugador, reservas = []) {
+async function sanitizeJugador(jugador, reservas = []) {
   return {
     id: jugador.id,
     name: jugador.nombre,
@@ -124,9 +128,9 @@ function getBadge(jugador) {
   return "Cadete";
 }
 
-function buildProfile(jugador) {
-  const reservas = getReservasByJugador(jugador.id);
-  const profile = sanitizeJugador(jugador, reservas);
+async function buildProfile(jugador) {
+  const reservas = await getReservasByJugador(jugador.id);
+  const profile = await sanitizeJugador(jugador, reservas);
   const lossRate = profile.matchesPlayed ? Math.max(0, 100 - getWinRate(jugador)) : 0;
   const ratio =
     profile.wins === 0 && profile.losses === 0
@@ -154,25 +158,29 @@ function getBearerToken(headerValue) {
   return token;
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const token = getBearerToken(req.headers.authorization);
   if (!token) {
     return res.status(401).json({ message: "Token requerido" });
   }
 
-  const sesion = getSesionByToken(token);
-  if (!sesion) {
-    return res.status(401).json({ message: "Sesion invalida" });
-  }
+  try {
+    const sesion = await getSesionByToken(token);
+    if (!sesion) {
+      return res.status(401).json({ message: "Sesion invalida" });
+    }
 
-  const jugador = getJugadorById(sesion.jugador_id);
-  if (!jugador) {
-    return res.status(401).json({ message: "Usuario no encontrado" });
-  }
+    const jugador = await getJugadorById(sesion.jugador_id);
+    if (!jugador) {
+      return res.status(401).json({ message: "Usuario no encontrado" });
+    }
 
-  req.token = token;
-  req.jugador = jugador;
-  return next();
+    req.token = token;
+    req.jugador = jugador;
+    return next();
+  } catch (err) {
+    return next(err);
+  }
 }
 
 function moderatorMiddleware(req, res, next) {
@@ -195,9 +203,9 @@ function cleanupExpiredPayments() {
   }
 }
 
-function validateReservationEligibility(jugadorId, eventId, team) {
-  const season = getTemporadaActual();
-  const event = getEventoById(eventId);
+async function validateReservationEligibility(jugadorId, eventId, team) {
+  const season = await getTemporadaActual();
+  const event = await getEventoById(eventId);
 
   if (!season) {
     return {
@@ -220,11 +228,11 @@ function validateReservationEligibility(jugadorId, eventId, team) {
     return { ok: false, status: 409, message: inscriptionValidation.error };
   }
 
-  if (hasReservaActiva(jugadorId, eventId)) {
+  if (await hasReservaActiva(jugadorId, eventId)) {
     return { ok: false, status: 409, message: "Ya tienes una reserva para esta partida" };
   }
 
-  const booked = countReservasActivasPorEvento(eventId);
+  const booked = await countReservasActivasPorEvento(eventId);
   if (booked >= event.cupos) {
     return { ok: false, status: 409, message: "No quedan cupos disponibles" };
   }
@@ -237,10 +245,10 @@ function validateReservationEligibility(jugadorId, eventId, team) {
 }
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "cqb-backend", database: "sqlite" });
+  res.json({ ok: true, service: "cqb-backend", database: "postgresql" });
 });
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
   if (!name || !email || !password) {
@@ -248,7 +256,7 @@ app.post("/api/auth/register", (req, res) => {
   }
 
   const normalizedEmail = String(email).trim().toLowerCase();
-  const exists = getJugadorByCorreo(normalizedEmail);
+  const exists = await getJugadorByCorreo(normalizedEmail);
   if (exists) {
     return res.status(409).json({ message: "El correo ya esta registrado" });
   }
@@ -266,44 +274,44 @@ app.post("/api/auth/register", (req, res) => {
     created_at: new Date().toISOString(),
   };
 
-  createJugador(newJugador);
-  ensureModeratorRoleForEmail(normalizedEmail);
-  const createdJugador = getJugadorById(newJugador.id);
+  await createJugador(newJugador);
+  await ensureModeratorRoleForEmail(normalizedEmail);
+  const createdJugador = await getJugadorById(newJugador.id);
   const token = uuidv4();
-  upsertSesion(token, newJugador.id);
+  await upsertSesion(token, newJugador.id);
 
-  return res.status(201).json({ token, user: buildProfile(createdJugador) });
-});
+  return res.status(201).json({ token, user: await buildProfile(createdJugador) });
+}));
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = String(email || "").trim().toLowerCase();
 
-  const jugador = getJugadorByCorreo(normalizedEmail);
+  const jugador = await getJugadorByCorreo(normalizedEmail);
   if (!jugador || jugador.contrasena !== String(password || "")) {
     return res.status(401).json({ message: "Credenciales invalidas" });
   }
 
-  ensureModeratorRoleForEmail(normalizedEmail);
-  const freshJugador = getJugadorById(jugador.id);
+  await ensureModeratorRoleForEmail(normalizedEmail);
+  const freshJugador = await getJugadorById(jugador.id);
 
   const token = uuidv4();
-  upsertSesion(token, freshJugador.id);
-  return res.json({ token, user: buildProfile(freshJugador) });
-});
+  await upsertSesion(token, freshJugador.id);
+  return res.json({ token, user: await buildProfile(freshJugador) });
+}));
 
-app.post("/api/auth/logout", authMiddleware, (req, res) => {
-  deleteSesion(req.token);
+app.post("/api/auth/logout", authMiddleware, asyncHandler(async (req, res) => {
+  await deleteSesion(req.token);
   return res.json({ message: "Sesion cerrada" });
-});
+}));
 
-app.get("/api/me", authMiddleware, (req, res) => {
-  const freshJugador = getJugadorById(req.jugador.id);
-  return res.json({ user: buildProfile(freshJugador) });
-});
+app.get("/api/me", authMiddleware, asyncHandler(async (req, res) => {
+  const freshJugador = await getJugadorById(req.jugador.id);
+  return res.json({ user: await buildProfile(freshJugador) });
+}));
 
-app.get("/api/events", (req, res) => {
-  const events = getEventosConDisponibilidad().map((event) => {
+app.get("/api/events", asyncHandler(async (req, res) => {
+  const events = (await getEventosConDisponibilidad()).map((event) => {
     const inscriptionValidation = validateInscriptionWindow(event.fecha);
     return {
       id: event.id,
@@ -321,18 +329,18 @@ app.get("/api/events", (req, res) => {
   });
 
   return res.json({ events });
-});
+}));
 
-app.get("/api/seasons/current", authMiddleware, (req, res) => {
-  return res.json({ season: mapTemporada(getTemporadaActual()) });
-});
+app.get("/api/seasons/current", authMiddleware, asyncHandler(async (req, res) => {
+  return res.json({ season: mapTemporada(await getTemporadaActual()) });
+}));
 
-app.post("/api/payments/prepare", authMiddleware, (req, res) => {
+app.post("/api/payments/prepare", authMiddleware, asyncHandler(async (req, res) => {
   cleanupExpiredPayments();
 
   const eventId = String(req.body?.eventId || "").trim();
   const team = String(req.body?.team || "").trim().toLowerCase();
-  const eligibility = validateReservationEligibility(req.jugador.id, eventId, team);
+  const eligibility = await validateReservationEligibility(req.jugador.id, eventId, team);
 
   if (!eligibility.ok) {
     return res.status(eligibility.status).json({ message: eligibility.message });
@@ -360,7 +368,7 @@ app.post("/api/payments/prepare", authMiddleware, (req, res) => {
     },
     expiresInMinutes: 15,
   });
-});
+}));
 
 app.post("/api/payments/confirm", authMiddleware, (req, res) => {
   cleanupExpiredPayments();
@@ -403,7 +411,7 @@ app.post("/api/payments/confirm", authMiddleware, (req, res) => {
   });
 });
 
-app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
+app.post("/api/events/:eventId/reserve", authMiddleware, asyncHandler(async (req, res) => {
   const { eventId } = req.params;
   const team = String(req.body?.team || "").trim().toLowerCase();
   const paymentToken = String(req.body?.paymentToken || "").trim();
@@ -431,13 +439,12 @@ app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
     return res.status(409).json({ message: "Debes confirmar el pago antes de inscribirte." });
   }
 
-  const eligibility = validateReservationEligibility(req.jugador.id, eventId, team);
+  const eligibility = await validateReservationEligibility(req.jugador.id, eventId, team);
   if (!eligibility.ok) {
     return res.status(eligibility.status).json({ message: eligibility.message });
   }
 
   const event = eligibility.event;
-  const season = eligibility.season;
 
   const reservation = {
     id: uuidv4(),
@@ -451,17 +458,17 @@ app.post("/api/events/:eventId/reserve", authMiddleware, (req, res) => {
     created_at: new Date().toISOString(),
   };
 
-  createReserva(reservation);
+  await createReserva(reservation);
   pendingPayments.delete(paymentToken);
 
-  const freshJugador = getJugadorById(req.jugador.id);
+  const freshJugador = await getJugadorById(req.jugador.id);
   return res.status(201).json({
     reservation: mapReserva(reservation),
-    user: buildProfile(freshJugador),
+    user: await buildProfile(freshJugador),
   });
-});
+}));
 
-app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMiddleware, (req, res) => {
+app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
   const { reservationId } = req.params;
   const result = String(req.body?.result || "").trim().toLowerCase();
 
@@ -469,7 +476,7 @@ app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMid
     return res.status(400).json({ message: "El resultado debe ser win o loss" });
   }
 
-  const reservation = getReservaById(reservationId);
+  const reservation = await getReservaById(reservationId);
   if (!reservation) {
     return res.status(404).json({ message: "Reserva no encontrada" });
   }
@@ -478,28 +485,28 @@ app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMid
     return res.status(409).json({ message: "Esta reserva ya fue cerrada" });
   }
 
-  setResultadoReserva(reservationId, reservation.jugador_id, result);
+  await setResultadoReserva(reservationId, reservation.jugador_id, result);
 
-  const freshReservation = getReservaById(reservationId);
-  const freshPlayer = getJugadorById(reservation.jugador_id);
+  const freshReservation = await getReservaById(reservationId);
+  const freshPlayer = await getJugadorById(reservation.jugador_id);
 
   return res.json({
     reservation: mapReserva(freshReservation),
-    player: buildProfile(freshPlayer),
+    player: await buildProfile(freshPlayer),
   });
-});
+}));
 
-app.get("/api/moderation/reservations", authMiddleware, moderatorMiddleware, (req, res) => {
-  const reservations = getReservasParaModeracion().map(mapReservaModeracion);
+app.get("/api/moderation/reservations", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const reservations = (await getReservasParaModeracion()).map(mapReservaModeracion);
   return res.json({ reservations });
-});
+}));
 
-app.get("/api/moderation/players", authMiddleware, moderatorMiddleware, (req, res) => {
-  const players = getJugadoresRegistrados().map(mapJugadorModeracion);
+app.get("/api/moderation/players", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const players = (await getJugadoresRegistrados()).map(mapJugadorModeracion);
   return res.json({ players });
-});
+}));
 
-app.post("/api/moderation/reservations/:reservationId/team", authMiddleware, moderatorMiddleware, (req, res) => {
+app.post("/api/moderation/reservations/:reservationId/team", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
   const { reservationId } = req.params;
   const team = String(req.body?.team || "").trim().toLowerCase();
 
@@ -507,7 +514,7 @@ app.post("/api/moderation/reservations/:reservationId/team", authMiddleware, mod
     return res.status(400).json({ message: "El equipo debe ser rojo o azul" });
   }
 
-  const reservation = getReservaById(reservationId);
+  const reservation = await getReservaById(reservationId);
   if (!reservation) {
     return res.status(404).json({ message: "Reserva no encontrada" });
   }
@@ -516,16 +523,17 @@ app.post("/api/moderation/reservations/:reservationId/team", authMiddleware, mod
     return res.status(409).json({ message: "Solo puedes cambiar el equipo de reservas pendientes" });
   }
 
-  const updated = setEquipoReservaModeracion(reservationId, team);
+  const updated = await setEquipoReservaModeracion(reservationId, team);
   if (!updated) {
     return res.status(409).json({ message: "No fue posible actualizar el equipo" });
   }
 
-  const freshReservation = getReservasParaModeracion().find((item) => item.id === reservationId);
+  const allReservations = await getReservasParaModeracion();
+  const freshReservation = allReservations.find((item) => item.id === reservationId);
   return res.json({ reservation: freshReservation ? mapReservaModeracion(freshReservation) : null });
-});
+}));
 
-app.post("/api/moderation/events/:eventId/result", authMiddleware, moderatorMiddleware, (req, res) => {
+app.post("/api/moderation/events/:eventId/result", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
   const { eventId } = req.params;
   const winningTeam = String(req.body?.winningTeam || "").trim().toLowerCase();
 
@@ -533,18 +541,19 @@ app.post("/api/moderation/events/:eventId/result", authMiddleware, moderatorMidd
     return res.status(400).json({ message: "El equipo ganador debe ser rojo o azul" });
   }
 
-  const event = getEventoById(eventId);
+  const event = await getEventoById(eventId);
   if (!event) {
     return res.status(404).json({ message: "Partida no encontrada" });
   }
 
-  const activeReservations = getReservasActivasPorEvento(eventId);
+  const activeReservations = await getReservasActivasPorEvento(eventId);
   if (activeReservations.length === 0) {
     return res.status(409).json({ message: "La partida no tiene reservas pendientes por cerrar" });
   }
 
-  const updatedCount = setResultadosEventoPorEquipo(eventId, winningTeam);
-  const reservations = getReservasParaModeracion()
+  const updatedCount = await setResultadosEventoPorEquipo(eventId, winningTeam);
+  const allReservations = await getReservasParaModeracion();
+  const reservations = allReservations
     .filter((reservation) => reservation.evento_id === eventId)
     .map(mapReservaModeracion);
 
@@ -557,41 +566,46 @@ app.post("/api/moderation/events/:eventId/result", authMiddleware, moderatorMidd
     },
     reservations,
   });
-});
+}));
 
-app.post("/api/moderation/seasons/end", authMiddleware, moderatorMiddleware, (req, res) => {
-  const temporada = getTemporadaActual();
+app.post("/api/moderation/seasons/end", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const temporada = await getTemporadaActual();
   if (!temporada) {
     return res.status(409).json({ message: "No hay temporada activa para cerrar" });
   }
 
-  const activeReservations = countReservasActivasTemporada();
+  const activeReservations = await countReservasActivasTemporada();
   if (activeReservations > 0) {
     return res.status(409).json({
       message: "Debes cerrar primero todas las partidas pendientes antes de terminar la temporada",
     });
   }
 
-  const closedSeason = cerrarTemporadaActiva();
+  const closedSeason = await cerrarTemporadaActiva();
   return res.json({ season: mapTemporada(closedSeason) });
-});
+}));
 
-app.post("/api/moderation/seasons/start", authMiddleware, moderatorMiddleware, (req, res) => {
-  const activeSeason = getTemporadaActual();
+app.post("/api/moderation/seasons/start", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const activeSeason = await getTemporadaActual();
   if (activeSeason) {
     return res.status(409).json({
       message: "Ya existe una temporada activa. Cierrala antes de iniciar una nueva.",
     });
   }
 
-  const newSeason = iniciarNuevaTemporada();
+  const newSeason = await iniciarNuevaTemporada();
   return res.status(201).json({ season: mapTemporada(newSeason) });
-});
+}));
 
 app.use(express.static(path.join(__dirname, "..")));
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ message: "Error interno del servidor" });
 });
 
 module.exports = app;

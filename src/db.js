@@ -1,146 +1,191 @@
-const path = require("path");
-const Database = require("better-sqlite3");
+const { Pool } = require("pg");
+const dns = require("dns");
 
-const dbPath = path.join(__dirname, "..", "data", "cqb.sqlite");
-const db = new Database(dbPath);
-
-db.pragma("journal_mode = WAL");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS jugadores (
-    id TEXT PRIMARY KEY,
-    nombre TEXT NOT NULL,
-    correo TEXT NOT NULL UNIQUE,
-    contrasena TEXT NOT NULL,
-    rol TEXT NOT NULL DEFAULT 'user',
-    victorias INTEGER NOT NULL DEFAULT 0,
-    derrotas INTEGER NOT NULL DEFAULT 0,
-    partidas_jugadas INTEGER NOT NULL DEFAULT 0,
-    reservas_activas INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS sesiones (
-    token TEXT PRIMARY KEY,
-    jugador_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (jugador_id) REFERENCES jugadores (id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS eventos (
-    id TEXT PRIMARY KEY,
-    titulo TEXT NOT NULL,
-    fecha TEXT NOT NULL,
-    nivel TEXT NOT NULL,
-    precio TEXT NOT NULL,
-    cupos INTEGER NOT NULL,
-    inscription_start TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS temporadas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    numero INTEGER NOT NULL UNIQUE,
-    nombre TEXT NOT NULL,
-    estado TEXT NOT NULL,
-    started_at TEXT NOT NULL,
-    ended_at TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS reservas (
-    id TEXT PRIMARY KEY,
-    jugador_id TEXT NOT NULL,
-    evento_id TEXT NOT NULL,
-    evento_titulo TEXT NOT NULL,
-    evento_fecha TEXT NOT NULL,
-    temporada_id INTEGER,
-    equipo TEXT NOT NULL DEFAULT 'rojo',
-    estado TEXT NOT NULL,
-    resultado TEXT,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (jugador_id) REFERENCES jugadores (id) ON DELETE CASCADE,
-    FOREIGN KEY (evento_id) REFERENCES eventos (id) ON DELETE CASCADE,
-    FOREIGN KEY (temporada_id) REFERENCES temporadas (id)
-  );
-`);
-
-const jugadorColumns = db.prepare("PRAGMA table_info(jugadores)").all();
-const hasRolColumn = jugadorColumns.some((column) => column.name === "rol");
-const reservaColumns = db.prepare("PRAGMA table_info(reservas)").all();
-const hasEquipoColumn = reservaColumns.some((column) => column.name === "equipo");
-const hasTemporadaIdColumn = reservaColumns.some((column) => column.name === "temporada_id");
-
-if (!hasRolColumn) {
-  db.exec("ALTER TABLE jugadores ADD COLUMN rol TEXT NOT NULL DEFAULT 'user'");
+function parseBooleanEnv(name) {
+  const rawValue = process.env[name];
+  if (rawValue === undefined) return undefined;
+  return ["1", "true", "yes", "on"].includes(String(rawValue).trim().toLowerCase());
 }
 
-if (!hasEquipoColumn) {
-  db.exec("ALTER TABLE reservas ADD COLUMN equipo TEXT NOT NULL DEFAULT 'rojo'");
+function shouldUseSsl(databaseUrl) {
+  const explicitSsl = parseBooleanEnv("DB_SSL");
+  if (explicitSsl !== undefined) return explicitSsl;
+
+  if (process.env.NODE_ENV === "production") return true;
+  if (typeof databaseUrl !== "string") return false;
+  return databaseUrl.includes("supabase.co") || databaseUrl.includes("neon.tech");
 }
 
-if (!hasTemporadaIdColumn) {
-  db.exec("ALTER TABLE reservas ADD COLUMN temporada_id INTEGER");
+function getSslConfig(databaseUrl) {
+  if (!shouldUseSsl(databaseUrl)) return false;
+
+  const explicitRejectUnauthorized = parseBooleanEnv("DB_SSL_REJECT_UNAUTHORIZED");
+  return {
+    rejectUnauthorized: explicitRejectUnauthorized === undefined ? false : explicitRejectUnauthorized,
+  };
 }
 
-const eventosColumns = db.prepare("PRAGMA table_info(eventos)").all();
-const hasInscriptionStartColumn = eventosColumns.some((column) => column.name === "inscription_start");
-
-if (!hasInscriptionStartColumn) {
-  db.exec("ALTER TABLE eventos ADD COLUMN inscription_start TEXT");
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL no esta definida. Configura tu conexion PostgreSQL en variables de entorno.");
 }
+
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: getSslConfig(databaseUrl),
+  lookup: (hostname, _options, callback) => dns.lookup(hostname, { family: 4 }, callback),
+});
 
 const moderatorEmails = ["juan.erazo.gajardo@gmail.com"];
 const moderatorEmailSet = new Set(moderatorEmails.map((email) => String(email).trim().toLowerCase()));
 
-const promoteModerator = db.prepare(
-  "UPDATE jugadores SET rol = 'moderator' WHERE LOWER(TRIM(correo)) = ? AND rol != 'moderator'"
-);
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS jugadores (
+      id TEXT PRIMARY KEY,
+      nombre TEXT NOT NULL,
+      correo TEXT NOT NULL UNIQUE,
+      contrasena TEXT NOT NULL,
+      rol TEXT NOT NULL DEFAULT 'user',
+      victorias INTEGER NOT NULL DEFAULT 0,
+      derrotas INTEGER NOT NULL DEFAULT 0,
+      partidas_jugadas INTEGER NOT NULL DEFAULT 0,
+      reservas_activas INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
 
-const promoteModeratorsTx = db.transaction((emails) => {
-  emails.forEach((email) => {
-    promoteModerator.run(String(email).trim().toLowerCase());
-  });
-});
+    CREATE TABLE IF NOT EXISTS sesiones (
+      token TEXT PRIMARY KEY,
+      jugador_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      CONSTRAINT fk_sesiones_jugador FOREIGN KEY (jugador_id) REFERENCES jugadores (id) ON DELETE CASCADE
+    );
 
-promoteModeratorsTx(moderatorEmails);
+    CREATE TABLE IF NOT EXISTS eventos (
+      id TEXT PRIMARY KEY,
+      titulo TEXT NOT NULL,
+      fecha TEXT NOT NULL,
+      nivel TEXT NOT NULL,
+      precio TEXT NOT NULL,
+      cupos INTEGER NOT NULL,
+      inscription_start TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS temporadas (
+      id SERIAL PRIMARY KEY,
+      numero INTEGER NOT NULL UNIQUE,
+      nombre TEXT NOT NULL,
+      estado TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS reservas (
+      id TEXT PRIMARY KEY,
+      jugador_id TEXT NOT NULL,
+      evento_id TEXT NOT NULL,
+      evento_titulo TEXT NOT NULL,
+      evento_fecha TEXT NOT NULL,
+      temporada_id INTEGER,
+      equipo TEXT NOT NULL DEFAULT 'rojo',
+      estado TEXT NOT NULL,
+      resultado TEXT,
+      created_at TEXT NOT NULL,
+      CONSTRAINT fk_reservas_jugador FOREIGN KEY (jugador_id) REFERENCES jugadores (id) ON DELETE CASCADE,
+      CONSTRAINT fk_reservas_evento FOREIGN KEY (evento_id) REFERENCES eventos (id) ON DELETE CASCADE,
+      CONSTRAINT fk_reservas_temporada FOREIGN KEY (temporada_id) REFERENCES temporadas (id)
+    );
+  `);
+
+  for (const email of moderatorEmails) {
+    await pool.query(
+      "UPDATE jugadores SET rol = 'moderator' WHERE LOWER(TRIM(correo)) = $1 AND rol != 'moderator'",
+      [email.trim().toLowerCase()]
+    );
+  }
+
+  await ensureTemporadaActiva();
+
+  const { rows: countRows } = await pool.query("SELECT COUNT(*) AS total FROM eventos");
+  const countEvents = parseInt(countRows[0].total, 10);
+
+  if (countEvents === 0) {
+    const seedEvents = buildSeedEventsForCurrentWeek();
+    for (const event of seedEvents) {
+      await pool.query(
+        "INSERT INTO eventos (id, titulo, fecha, nivel, precio, cupos, inscription_start) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [event.id, event.titulo, event.fecha, event.nivel, event.precio, event.cupos, event.inscription_start]
+      );
+    }
+  } else {
+    const { rows: reservationRows } = await pool.query("SELECT COUNT(*) AS total FROM reservas");
+    if (parseInt(reservationRows[0].total, 10) === 0) {
+      const defaultIds = seedEventTemplates.map((e) => e.id);
+      const placeholders = defaultIds.map((_, i) => `$${i + 1}`).join(", ");
+      const { rows: existingEvents } = await pool.query(
+        `SELECT id, fecha FROM eventos WHERE id IN (${placeholders})`,
+        defaultIds
+      );
+
+      if (existingEvents.length === defaultIds.length) {
+        const currentWeekSeed = buildSeedEventsForCurrentWeek();
+        const currentWeekSeedById = new Map(currentWeekSeed.map((e) => [e.id, e]));
+
+        const needsSync = existingEvents.some((event) => {
+          const expected = currentWeekSeedById.get(event.id);
+          return expected && event.fecha !== expected.fecha;
+        });
+
+        if (needsSync) {
+          for (const row of currentWeekSeed) {
+            await pool.query(
+              "UPDATE eventos SET titulo = $1, fecha = $2, nivel = $3, precio = $4, cupos = $5, inscription_start = $6 WHERE id = $7",
+              [row.titulo, row.fecha, row.nivel, row.precio, row.cupos, row.inscription_start, row.id]
+            );
+          }
+        }
+      }
+    }
+  }
+}
 
 function isModeratorEmail(correo) {
   return moderatorEmailSet.has(String(correo || "").trim().toLowerCase());
 }
 
-function ensureModeratorRoleForEmail(correo) {
+async function ensureModeratorRoleForEmail(correo) {
   const normalizedEmail = String(correo || "").trim().toLowerCase();
   if (!isModeratorEmail(normalizedEmail)) return 0;
-  const result = promoteModerator.run(normalizedEmail);
-  return result.changes || 0;
+  const result = await pool.query(
+    "UPDATE jugadores SET rol = 'moderator' WHERE LOWER(TRIM(correo)) = $1 AND rol != 'moderator'",
+    [normalizedEmail]
+  );
+  return result.rowCount || 0;
 }
 
-function createSeason(numero) {
+async function createSeason(numero) {
   const now = new Date().toISOString();
-  db.prepare(
-    "INSERT INTO temporadas (numero, nombre, estado, started_at, ended_at) VALUES (?, ?, 'active', ?, NULL)"
-  ).run(numero, `Temporada ${numero}`, now);
+  await pool.query(
+    "INSERT INTO temporadas (numero, nombre, estado, started_at, ended_at) VALUES ($1, $2, 'active', $3, NULL)",
+    [numero, `Temporada ${numero}`, now]
+  );
 }
 
-function getTemporadaActual() {
-  return db
-    .prepare("SELECT * FROM temporadas WHERE estado = 'active' ORDER BY numero DESC LIMIT 1")
-    .get();
+async function getTemporadaActual() {
+  const { rows } = await pool.query(
+    "SELECT * FROM temporadas WHERE estado = 'active' ORDER BY numero DESC LIMIT 1"
+  );
+  return rows[0] || null;
 }
 
-function ensureTemporadaActiva() {
-  const active = getTemporadaActual();
+async function ensureTemporadaActiva() {
+  const active = await getTemporadaActual();
   if (active) return active;
 
-  const last = db.prepare("SELECT COALESCE(MAX(numero), 0) AS numero FROM temporadas").get();
-  const nextNumero = (last?.numero || 0) + 1;
-  createSeason(nextNumero);
+  const { rows } = await pool.query("SELECT COALESCE(MAX(numero), 0) AS numero FROM temporadas");
+  const nextNumero = (parseInt(rows[0]?.numero, 10) || 0) + 1;
+  await createSeason(nextNumero);
   return getTemporadaActual();
-}
-
-const activeTemporada = ensureTemporadaActiva();
-
-if (!hasTemporadaIdColumn && activeTemporada) {
-  db.prepare("UPDATE reservas SET temporada_id = ? WHERE temporada_id IS NULL").run(activeTemporada.id);
 }
 
 // Funciones helper para gestionar fechas de inscripción
@@ -276,330 +321,305 @@ function buildSeedEventsForCurrentWeek() {
   });
 }
 
-const countEvents = db.prepare("SELECT COUNT(*) AS total FROM eventos").get().total;
-if (countEvents === 0) {
-  const seedEvents = buildSeedEventsForCurrentWeek();
-  const insertEvent = db.prepare(
-    "INSERT INTO eventos (id, titulo, fecha, nivel, precio, cupos, inscription_start) VALUES (@id, @titulo, @fecha, @nivel, @precio, @cupos, @inscription_start)"
-  );
-  const seedTx = db.transaction((rows) => rows.forEach((row) => insertEvent.run(row)));
-  seedTx(seedEvents);
+async function getJugadorByCorreo(correo) {
+  const { rows } = await pool.query("SELECT * FROM jugadores WHERE correo = $1", [correo]);
+  return rows[0] || null;
 }
 
-if (countEvents > 0) {
-  const reservationCount = db.prepare("SELECT COUNT(*) AS total FROM reservas").get().total;
-  if (reservationCount === 0) {
-    const defaultIds = seedEventTemplates.map((event) => event.id);
-    const placeholders = defaultIds.map(() => "?").join(", ");
-    const existingDefaultEvents = db
-      .prepare(`SELECT id, fecha FROM eventos WHERE id IN (${placeholders})`)
-      .all(...defaultIds);
-
-    if (existingDefaultEvents.length === defaultIds.length) {
-      const currentWeekSeed = buildSeedEventsForCurrentWeek();
-      const currentWeekSeedById = new Map(currentWeekSeed.map((event) => [event.id, event]));
-
-      const needsSync = existingDefaultEvents.some((event) => {
-        const expected = currentWeekSeedById.get(event.id);
-        return expected && event.fecha !== expected.fecha;
-      });
-
-      if (needsSync) {
-        const updateEvent = db.prepare(
-          `UPDATE eventos
-           SET titulo = @titulo,
-               fecha = @fecha,
-               nivel = @nivel,
-               precio = @precio,
-               cupos = @cupos,
-               inscription_start = @inscription_start
-           WHERE id = @id`
-        );
-        const syncTx = db.transaction((rows) => rows.forEach((row) => updateEvent.run(row)));
-        syncTx(currentWeekSeed);
-      }
-    }
-  }
+async function getJugadorById(id) {
+  const { rows } = await pool.query("SELECT * FROM jugadores WHERE id = $1", [id]);
+  return rows[0] || null;
 }
 
-function getJugadorByCorreo(correo) {
-  return db.prepare("SELECT * FROM jugadores WHERE correo = ?").get(correo);
-}
-
-function getJugadorById(id) {
-  return db.prepare("SELECT * FROM jugadores WHERE id = ?").get(id);
-}
-
-function createJugador(jugador) {
-  db.prepare(
+async function createJugador(jugador) {
+  await pool.query(
     `INSERT INTO jugadores
       (id, nombre, correo, contrasena, rol, victorias, derrotas, partidas_jugadas, reservas_activas, created_at)
-      VALUES (@id, @nombre, @correo, @contrasena, @rol, @victorias, @derrotas, @partidas_jugadas, @reservas_activas, @created_at)`
-  ).run(jugador);
-}
-
-function upsertSesion(token, jugadorId) {
-  db.prepare("DELETE FROM sesiones WHERE jugador_id = ?").run(jugadorId);
-  db.prepare("INSERT INTO sesiones (token, jugador_id, created_at) VALUES (?, ?, ?)").run(
-    token,
-    jugadorId,
-    new Date().toISOString()
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      jugador.id, jugador.nombre, jugador.correo, jugador.contrasena, jugador.rol,
+      jugador.victorias, jugador.derrotas, jugador.partidas_jugadas, jugador.reservas_activas, jugador.created_at,
+    ]
   );
 }
 
-function getSesionByToken(token) {
-  return db.prepare("SELECT * FROM sesiones WHERE token = ?").get(token);
+async function upsertSesion(token, jugadorId) {
+  await pool.query("DELETE FROM sesiones WHERE jugador_id = $1", [jugadorId]);
+  await pool.query(
+    "INSERT INTO sesiones (token, jugador_id, created_at) VALUES ($1, $2, $3)",
+    [token, jugadorId, new Date().toISOString()]
+  );
 }
 
-function deleteSesion(token) {
-  db.prepare("DELETE FROM sesiones WHERE token = ?").run(token);
+async function getSesionByToken(token) {
+  const { rows } = await pool.query("SELECT * FROM sesiones WHERE token = $1", [token]);
+  return rows[0] || null;
 }
 
-function getReservasByJugador(jugadorId) {
-  const temporada = getTemporadaActual();
+async function deleteSesion(token) {
+  await pool.query("DELETE FROM sesiones WHERE token = $1", [token]);
+}
+
+async function getReservasByJugador(jugadorId) {
+  const temporada = await getTemporadaActual();
   if (!temporada) return [];
-
-  return db
-    .prepare("SELECT * FROM reservas WHERE jugador_id = ? AND temporada_id = ? ORDER BY evento_fecha ASC")
-    .all(jugadorId, temporada.id);
+  const { rows } = await pool.query(
+    "SELECT * FROM reservas WHERE jugador_id = $1 AND temporada_id = $2 ORDER BY evento_fecha ASC",
+    [jugadorId, temporada.id]
+  );
+  return rows;
 }
 
-function getEventosConDisponibilidad() {
-  const temporada = getTemporadaActual();
+async function getEventosConDisponibilidad() {
+  const temporada = await getTemporadaActual();
   const temporadaId = temporada?.id || -1;
-
-  return db
-    .prepare(
-      `SELECT
-        e.id,
-        e.titulo,
-        e.fecha,
-        e.nivel,
-        e.precio,
-        e.cupos,
-        MAX(0, e.cupos - COALESCE(r.reservas_activas, 0)) AS cupos_disponibles
-      FROM eventos e
-      LEFT JOIN (
-        SELECT evento_id, COUNT(*) AS reservas_activas
-        FROM reservas
-        WHERE estado = 'upcoming' AND temporada_id = ?
-        GROUP BY evento_id
-      ) r ON r.evento_id = e.id
-      ORDER BY e.fecha ASC`
-    )
-    .all(temporadaId);
+  const { rows } = await pool.query(
+    `SELECT
+      e.id,
+      e.titulo,
+      e.fecha,
+      e.nivel,
+      e.precio,
+      e.cupos,
+      GREATEST(0, e.cupos - COALESCE(r.reservas_activas, 0)) AS cupos_disponibles
+    FROM eventos e
+    LEFT JOIN (
+      SELECT evento_id, COUNT(*) AS reservas_activas
+      FROM reservas
+      WHERE estado = 'upcoming' AND temporada_id = $1
+      GROUP BY evento_id
+    ) r ON r.evento_id = e.id
+    ORDER BY e.fecha ASC`,
+    [temporadaId]
+  );
+  return rows;
 }
 
-function getEventoById(eventoId) {
-  return db.prepare("SELECT * FROM eventos WHERE id = ?").get(eventoId);
+async function getEventoById(eventoId) {
+  const { rows } = await pool.query("SELECT * FROM eventos WHERE id = $1", [eventoId]);
+  return rows[0] || null;
 }
 
-function hasReservaActiva(jugadorId, eventoId) {
-  const temporada = getTemporadaActual();
+async function hasReservaActiva(jugadorId, eventoId) {
+  const temporada = await getTemporadaActual();
   if (!temporada) return false;
-
-  const row = db
-    .prepare(
-      "SELECT COUNT(*) AS total FROM reservas WHERE jugador_id = ? AND evento_id = ? AND temporada_id = ? AND estado = 'upcoming'"
-    )
-    .get(jugadorId, eventoId, temporada.id);
-  return row.total > 0;
+  const { rows } = await pool.query(
+    "SELECT COUNT(*) AS total FROM reservas WHERE jugador_id = $1 AND evento_id = $2 AND temporada_id = $3 AND estado = 'upcoming'",
+    [jugadorId, eventoId, temporada.id]
+  );
+  return parseInt(rows[0].total, 10) > 0;
 }
 
-function countReservasActivasPorEvento(eventoId) {
-  const temporada = getTemporadaActual();
+async function countReservasActivasPorEvento(eventoId) {
+  const temporada = await getTemporadaActual();
   if (!temporada) return 0;
-
-  const row = db
-    .prepare("SELECT COUNT(*) AS total FROM reservas WHERE evento_id = ? AND temporada_id = ? AND estado = 'upcoming'")
-    .get(eventoId, temporada.id);
-  return row.total;
+  const { rows } = await pool.query(
+    "SELECT COUNT(*) AS total FROM reservas WHERE evento_id = $1 AND temporada_id = $2 AND estado = 'upcoming'",
+    [eventoId, temporada.id]
+  );
+  return parseInt(rows[0].total, 10);
 }
 
-function countReservasActivasTemporada() {
-  const temporada = getTemporadaActual();
+async function countReservasActivasTemporada() {
+  const temporada = await getTemporadaActual();
   if (!temporada) return 0;
-
-  const row = db
-    .prepare("SELECT COUNT(*) AS total FROM reservas WHERE temporada_id = ? AND estado = 'upcoming'")
-    .get(temporada.id);
-  return row.total;
+  const { rows } = await pool.query(
+    "SELECT COUNT(*) AS total FROM reservas WHERE temporada_id = $1 AND estado = 'upcoming'",
+    [temporada.id]
+  );
+  return parseInt(rows[0].total, 10);
 }
 
-function createReserva(reserva) {
-  const temporada = getTemporadaActual();
-  if (!temporada) {
-    throw new Error("No hay temporada activa");
-  }
+async function createReserva(reserva) {
+  const temporada = await getTemporadaActual();
+  if (!temporada) throw new Error("No hay temporada activa");
 
-  const tx = db.transaction((payload) => {
-    db.prepare(
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
       `INSERT INTO reservas
         (id, jugador_id, evento_id, evento_titulo, evento_fecha, temporada_id, equipo, estado, resultado, created_at)
-        VALUES (@id, @jugador_id, @evento_id, @evento_titulo, @evento_fecha, @temporada_id, @equipo, @estado, @resultado, @created_at)`
-    ).run(payload);
-
-    db.prepare("UPDATE jugadores SET reservas_activas = reservas_activas + 1 WHERE id = ?").run(
-      payload.jugador_id
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        reserva.id, reserva.jugador_id, reserva.evento_id, reserva.evento_titulo,
+        reserva.evento_fecha, temporada.id, reserva.equipo, reserva.estado,
+        reserva.resultado || null, reserva.created_at,
+      ]
     );
-  });
-
-  tx({ ...reserva, temporada_id: temporada.id });
+    await client.query(
+      "UPDATE jugadores SET reservas_activas = reservas_activas + 1 WHERE id = $1",
+      [reserva.jugador_id]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-function getReservaByIdForJugador(reservaId, jugadorId) {
-  return db
-    .prepare("SELECT * FROM reservas WHERE id = ? AND jugador_id = ?")
-    .get(reservaId, jugadorId);
+async function getReservaByIdForJugador(reservaId, jugadorId) {
+  const { rows } = await pool.query(
+    "SELECT * FROM reservas WHERE id = $1 AND jugador_id = $2",
+    [reservaId, jugadorId]
+  );
+  return rows[0] || null;
 }
 
-function getReservaById(reservaId) {
-  return db.prepare("SELECT * FROM reservas WHERE id = ?").get(reservaId);
+async function getReservaById(reservaId) {
+  const { rows } = await pool.query("SELECT * FROM reservas WHERE id = $1", [reservaId]);
+  return rows[0] || null;
 }
 
-function getJugadoresRegistrados() {
-  return db
-    .prepare(
-      `SELECT
-        id,
-        nombre,
-        correo,
-        rol,
-        victorias,
-        derrotas,
-        partidas_jugadas,
-        reservas_activas,
-        created_at
-      FROM jugadores
-      ORDER BY created_at DESC`
-    )
-    .all();
+async function getJugadoresRegistrados() {
+  const { rows } = await pool.query(
+    `SELECT id, nombre, correo, rol, victorias, derrotas, partidas_jugadas, reservas_activas, created_at
+     FROM jugadores
+     ORDER BY created_at DESC`
+  );
+  return rows;
 }
 
-function getReservasParaModeracion() {
-  const temporada = getTemporadaActual();
+async function getReservasParaModeracion() {
+  const temporada = await getTemporadaActual();
   if (!temporada) return [];
-
-  return db
-    .prepare(
-      `SELECT
-        r.*,
-        j.nombre AS jugador_nombre,
-        j.correo AS jugador_correo
-      FROM reservas r
-      INNER JOIN jugadores j ON j.id = r.jugador_id
-      WHERE r.temporada_id = ?
-      ORDER BY
-        CASE WHEN r.estado = 'upcoming' THEN 0 ELSE 1 END,
-        r.evento_fecha ASC,
-        r.created_at ASC`
-    )
-    .all(temporada.id);
+  const { rows } = await pool.query(
+    `SELECT
+      r.*,
+      j.nombre AS jugador_nombre,
+      j.correo AS jugador_correo
+    FROM reservas r
+    INNER JOIN jugadores j ON j.id = r.jugador_id
+    WHERE r.temporada_id = $1
+    ORDER BY
+      CASE WHEN r.estado = 'upcoming' THEN 0 ELSE 1 END,
+      r.evento_fecha ASC,
+      r.created_at ASC`,
+    [temporada.id]
+  );
+  return rows;
 }
 
-function getReservasActivasPorEvento(eventoId) {
-  const temporada = getTemporadaActual();
+async function getReservasActivasPorEvento(eventoId) {
+  const temporada = await getTemporadaActual();
   if (!temporada) return [];
-
-  return db
-    .prepare(
-      "SELECT * FROM reservas WHERE evento_id = ? AND temporada_id = ? AND estado = 'upcoming' ORDER BY created_at ASC"
-    )
-    .all(eventoId, temporada.id);
+  const { rows } = await pool.query(
+    "SELECT * FROM reservas WHERE evento_id = $1 AND temporada_id = $2 AND estado = 'upcoming' ORDER BY created_at ASC",
+    [eventoId, temporada.id]
+  );
+  return rows;
 }
 
-function setEquipoReservaModeracion(reservaId, equipo) {
-  const temporada = getTemporadaActual();
+async function setEquipoReservaModeracion(reservaId, equipo) {
+  const temporada = await getTemporadaActual();
   if (!temporada) return 0;
-
-  const result = db
-    .prepare(
-      "UPDATE reservas SET equipo = ? WHERE id = ? AND temporada_id = ? AND estado = 'upcoming'"
-    )
-    .run(equipo, reservaId, temporada.id);
-
-  return result.changes || 0;
+  const result = await pool.query(
+    "UPDATE reservas SET equipo = $1 WHERE id = $2 AND temporada_id = $3 AND estado = 'upcoming'",
+    [equipo, reservaId, temporada.id]
+  );
+  return result.rowCount || 0;
 }
 
-function setResultadoReserva(reservaId, jugadorId, resultado) {
-  const tx = db.transaction((payload) => {
-    db.prepare("UPDATE reservas SET estado = 'played', resultado = ? WHERE id = ? AND jugador_id = ?").run(
-      payload.resultado,
-      payload.reservaId,
-      payload.jugadorId
+async function setResultadoReserva(reservaId, jugadorId, resultado) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "UPDATE reservas SET estado = 'played', resultado = $1 WHERE id = $2 AND jugador_id = $3",
+      [resultado, reservaId, jugadorId]
     );
-
-    db.prepare(
+    await client.query(
       `UPDATE jugadores
        SET
          partidas_jugadas = partidas_jugadas + 1,
-         victorias = victorias + CASE WHEN ? = 'win' THEN 1 ELSE 0 END,
-         derrotas = derrotas + CASE WHEN ? = 'loss' THEN 1 ELSE 0 END,
+         victorias = victorias + CASE WHEN $1 = 'win' THEN 1 ELSE 0 END,
+         derrotas = derrotas + CASE WHEN $1 = 'loss' THEN 1 ELSE 0 END,
          reservas_activas = CASE WHEN reservas_activas > 0 THEN reservas_activas - 1 ELSE 0 END
-       WHERE id = ?`
-    ).run(payload.resultado, payload.resultado, payload.jugadorId);
-  });
-
-  tx({ reservaId, jugadorId, resultado });
+       WHERE id = $2`,
+      [resultado, jugadorId]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-function setResultadosEventoPorEquipo(eventoId, equipoGanador) {
-  const reservas = getReservasActivasPorEvento(eventoId);
+async function setResultadosEventoPorEquipo(eventoId, equipoGanador) {
+  const reservas = await getReservasActivasPorEvento(eventoId);
+  if (reservas.length === 0) return 0;
 
-  const tx = db.transaction((rows) => {
-    const updateReserva = db.prepare(
-      "UPDATE reservas SET estado = 'played', resultado = ? WHERE id = ? AND jugador_id = ?"
-    );
-    const updateJugador = db.prepare(
-      `UPDATE jugadores
-       SET
-         partidas_jugadas = partidas_jugadas + 1,
-         victorias = victorias + CASE WHEN ? = 'win' THEN 1 ELSE 0 END,
-         derrotas = derrotas + CASE WHEN ? = 'loss' THEN 1 ELSE 0 END,
-         reservas_activas = CASE WHEN reservas_activas > 0 THEN reservas_activas - 1 ELSE 0 END
-       WHERE id = ?`
-    );
-
-    rows.forEach((reserva) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const reserva of reservas) {
       const resultado = reserva.equipo === equipoGanador ? "win" : "loss";
-      updateReserva.run(resultado, reserva.id, reserva.jugador_id);
-      updateJugador.run(resultado, resultado, reserva.jugador_id);
-    });
-  });
-
-  tx(reservas);
+      await client.query(
+        "UPDATE reservas SET estado = 'played', resultado = $1 WHERE id = $2 AND jugador_id = $3",
+        [resultado, reserva.id, reserva.jugador_id]
+      );
+      await client.query(
+        `UPDATE jugadores
+         SET
+           partidas_jugadas = partidas_jugadas + 1,
+           victorias = victorias + CASE WHEN $1 = 'win' THEN 1 ELSE 0 END,
+           derrotas = derrotas + CASE WHEN $1 = 'loss' THEN 1 ELSE 0 END,
+           reservas_activas = CASE WHEN reservas_activas > 0 THEN reservas_activas - 1 ELSE 0 END
+         WHERE id = $2`,
+        [resultado, reserva.jugador_id]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
   return reservas.length;
 }
 
-function cerrarTemporadaActiva() {
-  const temporada = getTemporadaActual();
+async function cerrarTemporadaActiva() {
+  const temporada = await getTemporadaActual();
   if (!temporada) return null;
-
   const now = new Date().toISOString();
-  db.prepare("UPDATE temporadas SET estado = 'ended', ended_at = ? WHERE id = ?").run(now, temporada.id);
-  return db.prepare("SELECT * FROM temporadas WHERE id = ?").get(temporada.id);
+  await pool.query("UPDATE temporadas SET estado = 'ended', ended_at = $1 WHERE id = $2", [now, temporada.id]);
+  const { rows } = await pool.query("SELECT * FROM temporadas WHERE id = $1", [temporada.id]);
+  return rows[0] || null;
 }
 
-function iniciarNuevaTemporada() {
-  const tx = db.transaction(() => {
-    const last = db.prepare("SELECT COALESCE(MAX(numero), 0) AS numero FROM temporadas").get();
-    const nextNumero = (last?.numero || 0) + 1;
+async function iniciarNuevaTemporada() {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: lastRows } = await client.query("SELECT COALESCE(MAX(numero), 0) AS numero FROM temporadas");
+    const nextNumero = (parseInt(lastRows[0]?.numero, 10) || 0) + 1;
     const now = new Date().toISOString();
-
-    const insert = db.prepare(
-      "INSERT INTO temporadas (numero, nombre, estado, started_at, ended_at) VALUES (?, ?, 'active', ?, NULL)"
+    const { rows: insertRows } = await client.query(
+      "INSERT INTO temporadas (numero, nombre, estado, started_at, ended_at) VALUES ($1, $2, 'active', $3, NULL) RETURNING id",
+      [nextNumero, `Temporada ${nextNumero}`, now]
     );
-    const result = insert.run(nextNumero, `Temporada ${nextNumero}`, now);
-
-    db.prepare("UPDATE jugadores SET victorias = 0, derrotas = 0, partidas_jugadas = 0, reservas_activas = 0").run();
-
-    return db.prepare("SELECT * FROM temporadas WHERE id = ?").get(result.lastInsertRowid);
-  });
-
-  return tx();
+    const newId = insertRows[0].id;
+    await client.query(
+      "UPDATE jugadores SET victorias = 0, derrotas = 0, partidas_jugadas = 0, reservas_activas = 0"
+    );
+    const { rows: seasonRows } = await client.query("SELECT * FROM temporadas WHERE id = $1", [newId]);
+    await client.query("COMMIT");
+    return seasonRows[0] || null;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
+  initDb,
   getJugadorByCorreo,
   getJugadorById,
   createJugador,
@@ -630,3 +650,4 @@ module.exports = {
   isModeratorEmail,
   ensureModeratorRoleForEmail,
 };
+
