@@ -1,16 +1,26 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const {
   getJugadorByCorreo,
   getJugadorById,
   createJugador,
+  saveEmailVerificationToken,
+  verifyEmailByTokenHash,
+  clearExpiredEmailVerificationToken,
+  savePasswordResetToken,
+  resetPasswordByTokenHash,
+  clearExpiredPasswordResetToken,
   upsertSesion,
   getSesionByToken,
   deleteSesion,
   getReservasByJugador,
   getEventosConDisponibilidad,
+  getEventosParaModeracion,
+  createEvento,
+  deleteEventoSiSinReservas,
   getEventoById,
   hasReservaActiva,
   countReservasActivasPorEvento,
@@ -26,10 +36,12 @@ const {
   iniciarNuevaTemporada,
   setResultadoReserva,
   setResultadosEventoPorEquipo,
+  getMondayOfWeek,
   validateInscriptionWindow,
   isModeratorEmail,
   ensureModeratorRoleForEmail,
 } = require("./db");
+const { isMailerConfigured, sendVerificationEmail, sendPasswordResetEmail } = require("./mailer");
 
 function isStaffRole(role) {
   return role === "moderator" || role === "admin";
@@ -37,11 +49,77 @@ function isStaffRole(role) {
 
 const app = express();
 
+app.set("trust proxy", true);
+
 app.use(cors());
 app.use(express.json());
 
 const pendingPayments = new Map();
 const PAYMENT_TTL_MS = 15 * 60 * 1000;
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+const EMAIL_RESEND_COOLDOWN_MS = 60 * 1000;
+const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
+const PASSWORD_RESET_RESEND_COOLDOWN_MS = 60 * 1000;
+
+function getConfiguredAppUrl() {
+  const raw = String(process.env.APP_URL || "").trim();
+  if (!raw) return null;
+
+  try {
+    return new URL(raw);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function getCanonicalHost() {
+  const explicitHost = String(process.env.CANONICAL_HOST || "").trim().toLowerCase();
+  if (explicitHost) return explicitHost;
+
+  const configuredUrl = getConfiguredAppUrl();
+  if (!configuredUrl) return null;
+  return configuredUrl.host.toLowerCase();
+}
+
+function getCanonicalProtocol() {
+  const explicitProtocol = String(process.env.CANONICAL_PROTOCOL || "").trim().toLowerCase();
+  if (explicitProtocol === "http" || explicitProtocol === "https") {
+    return explicitProtocol;
+  }
+
+  const configuredUrl = getConfiguredAppUrl();
+  if (!configuredUrl) return "https";
+  return configuredUrl.protocol.replace(":", "").toLowerCase() || "https";
+}
+
+function normalizeRequestHost(hostValue) {
+  const firstHost = String(hostValue || "").split(",")[0].trim().toLowerCase();
+  if (!firstHost) return "";
+  return firstHost;
+}
+
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV !== "production") return next();
+
+  const canonicalHost = getCanonicalHost();
+  if (!canonicalHost) return next();
+
+  const canonicalProtocol = getCanonicalProtocol();
+  const requestHost = normalizeRequestHost(req.headers["x-forwarded-host"] || req.get("host"));
+  const requestProtocol = String(req.headers["x-forwarded-proto"] || req.protocol || "http")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+
+  const matchesCanonicalHost = requestHost === canonicalHost;
+  const matchesCanonicalProtocol = requestProtocol === canonicalProtocol;
+
+  if (matchesCanonicalHost && matchesCanonicalProtocol) {
+    return next();
+  }
+
+  return res.redirect(301, `${canonicalProtocol}://${canonicalHost}${req.originalUrl}`);
+});
 
 function mapReserva(reserva) {
   return {
@@ -79,6 +157,21 @@ function mapJugadorModeracion(jugador) {
   };
 }
 
+function mapEventoModeracion(evento) {
+  return {
+    id: evento.id,
+    title: evento.titulo,
+    date: evento.fecha,
+    level: evento.nivel,
+    price: evento.precio,
+    slots: evento.cupos,
+    availableSlots: evento.cupos_disponibles,
+    enrolledTotal: evento.inscritos_totales,
+    enrolledUpcoming: evento.inscritos_pendientes,
+    enrolledPlayed: evento.inscritos_cerrados,
+  };
+}
+
 function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
@@ -101,6 +194,7 @@ async function sanitizeJugador(jugador, reservas = []) {
     id: jugador.id,
     name: jugador.nombre,
     email: jugador.correo,
+    emailVerified: Boolean(jugador.email_verificado),
     role: jugador.rol || "user",
     createdAt: jugador.created_at,
     matchesPlayed: jugador.partidas_jugadas,
@@ -108,6 +202,114 @@ async function sanitizeJugador(jugador, reservas = []) {
     losses: jugador.derrotas,
     activeReservations: jugador.reservas_activas,
     reservations: reservas.map(mapReserva),
+  };
+}
+
+function getAppBaseUrl(req) {
+  const configuredBaseUrl = String(process.env.APP_URL || "").trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/$/, "");
+  }
+
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.headers["x-forwarded-host"] || req.get("host") || "localhost:3000";
+  return `${protocol}://${host}`.replace(/\/$/, "");
+}
+
+function hashVerificationToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+function getEmailVerificationStatus(jugador) {
+  if (!jugador) return "invalid";
+  if (jugador.email_verificado) return "verified";
+  if (!jugador.email_verification_expires_at) return "pending";
+  return jugador.email_verification_expires_at < new Date().toISOString() ? "expired" : "pending";
+}
+
+async function issueEmailVerification(jugador, req) {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashVerificationToken(rawToken);
+  const nowIso = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString();
+  const verificationUrl = `${getAppBaseUrl(req)}/auth/verify-email?token=${encodeURIComponent(rawToken)}`;
+
+  await saveEmailVerificationToken(jugador.id, tokenHash, expiresAt, nowIso);
+
+  if (!isMailerConfigured()) {
+    console.warn(`SMTP no configurado. Enlace de verificacion para ${jugador.correo}: ${verificationUrl}`);
+    return {
+      sent: false,
+      verificationUrl,
+      reason: "smtp_not_configured",
+      expiresAt,
+    };
+  }
+
+  try {
+    await sendVerificationEmail({
+      to: jugador.correo,
+      name: jugador.nombre,
+      verificationUrl,
+    });
+  } catch (error) {
+    console.error(`No fue posible enviar el correo de verificacion a ${jugador.correo}:`, error);
+    return {
+      sent: false,
+      verificationUrl,
+      reason: "smtp_send_failed",
+      expiresAt,
+    };
+  }
+
+  return {
+    sent: true,
+    verificationUrl,
+    reason: null,
+    expiresAt,
+  };
+}
+
+async function issuePasswordReset(jugador, req) {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashVerificationToken(rawToken);
+  const nowIso = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
+  const resetUrl = `${getAppBaseUrl(req)}/reset-password.html?token=${encodeURIComponent(rawToken)}`;
+
+  await savePasswordResetToken(jugador.id, tokenHash, expiresAt, nowIso);
+
+  if (!isMailerConfigured()) {
+    console.warn(`SMTP no configurado. Enlace de reset para ${jugador.correo}: ${resetUrl}`);
+    return {
+      sent: false,
+      resetUrl,
+      reason: "smtp_not_configured",
+      expiresAt,
+    };
+  }
+
+  try {
+    await sendPasswordResetEmail({
+      to: jugador.correo,
+      name: jugador.nombre,
+      resetUrl,
+    });
+  } catch (error) {
+    console.error(`No fue posible enviar el correo de reset a ${jugador.correo}:`, error);
+    return {
+      sent: false,
+      resetUrl,
+      reason: "smtp_send_failed",
+      expiresAt,
+    };
+  }
+
+  return {
+    sent: true,
+    resetUrl,
+    reason: null,
+    expiresAt,
   };
 }
 
@@ -206,6 +408,19 @@ function cleanupExpiredPayments() {
 async function validateReservationEligibility(jugadorId, eventId, team) {
   const season = await getTemporadaActual();
   const event = await getEventoById(eventId);
+  const jugador = await getJugadorById(jugadorId);
+
+  if (!jugador) {
+    return { ok: false, status: 404, message: "Usuario no encontrado" };
+  }
+
+  if (!jugador.email_verificado) {
+    return {
+      ok: false,
+      status: 403,
+      message: "Debes verificar tu correo antes de inscribirte a una partida.",
+    };
+  }
 
   if (!season) {
     return {
@@ -272,15 +487,28 @@ app.post("/api/auth/register", asyncHandler(async (req, res) => {
     partidas_jugadas: 0,
     reservas_activas: 0,
     created_at: new Date().toISOString(),
+    email_verificado: false,
+    email_verification_token_hash: null,
+    email_verification_expires_at: null,
+    email_verification_sent_at: null,
   };
 
   await createJugador(newJugador);
   await ensureModeratorRoleForEmail(normalizedEmail);
+  const verification = await issueEmailVerification(newJugador, req);
   const createdJugador = await getJugadorById(newJugador.id);
   const token = uuidv4();
   await upsertSesion(token, newJugador.id);
 
-  return res.status(201).json({ token, user: await buildProfile(createdJugador) });
+  return res.status(201).json({
+    token,
+    user: await buildProfile(createdJugador),
+    verificationEmailSent: verification.sent,
+    verificationRequired: true,
+    message: verification.sent
+      ? "Cuenta creada. Te enviamos un enlace para verificar tu correo."
+      : "Cuenta creada, pero no fue posible enviar el correo automaticamente. Revisa la configuracion SMTP o usa reenviar enlace.",
+  });
 }));
 
 app.post("/api/auth/login", asyncHandler(async (req, res) => {
@@ -297,8 +525,120 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
 
   const token = uuidv4();
   await upsertSesion(token, freshJugador.id);
-  return res.json({ token, user: await buildProfile(freshJugador) });
+  return res.json({
+    token,
+    user: await buildProfile(freshJugador),
+    verificationRequired: !freshJugador.email_verificado,
+  });
 }));
+
+app.post("/api/auth/resend-verification", authMiddleware, asyncHandler(async (req, res) => {
+  const freshJugador = await getJugadorById(req.jugador.id);
+  if (!freshJugador) {
+    return res.status(404).json({ message: "Usuario no encontrado" });
+  }
+
+  if (freshJugador.email_verificado) {
+    return res.status(409).json({ message: "Tu correo ya fue verificado." });
+  }
+
+  const lastSentAt = freshJugador.email_verification_sent_at
+    ? new Date(freshJugador.email_verification_sent_at).getTime()
+    : 0;
+
+  if (lastSentAt && Date.now() - lastSentAt < EMAIL_RESEND_COOLDOWN_MS) {
+    return res.status(429).json({
+      message: "Espera un minuto antes de volver a solicitar el correo de verificacion.",
+    });
+  }
+
+  const verification = await issueEmailVerification(freshJugador, req);
+  return res.json({
+    verificationEmailSent: verification.sent,
+    message: verification.sent
+      ? "Te reenviamos el enlace de verificacion a tu correo."
+      : "No se pudo enviar el correo automatico. Revisa la configuracion SMTP del servidor.",
+  });
+}));
+
+app.post("/api/auth/password/forgot", asyncHandler(async (req, res) => {
+  const normalizedEmail = String(req.body?.email || "").trim().toLowerCase();
+  const genericResponse = {
+    message: "Si el correo existe, te enviaremos un enlace para restablecer tu contrasena.",
+  };
+
+  if (!normalizedEmail) {
+    return res.json(genericResponse);
+  }
+
+  const jugador = await getJugadorByCorreo(normalizedEmail);
+  if (!jugador) {
+    return res.json(genericResponse);
+  }
+
+  const lastSentAt = jugador.password_reset_sent_at
+    ? new Date(jugador.password_reset_sent_at).getTime()
+    : 0;
+
+  if (!lastSentAt || Date.now() - lastSentAt >= PASSWORD_RESET_RESEND_COOLDOWN_MS) {
+    await issuePasswordReset(jugador, req);
+  }
+
+  return res.json(genericResponse);
+}));
+
+app.post("/api/auth/password/reset", asyncHandler(async (req, res) => {
+  const rawToken = String(req.body?.token || "").trim();
+  const newPassword = String(req.body?.newPassword || "").trim();
+
+  if (!rawToken || !newPassword) {
+    return res.status(400).json({ message: "Token y nueva contrasena son obligatorios." });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: "La nueva contrasena debe tener al menos 6 caracteres." });
+  }
+
+  const nowIso = new Date().toISOString();
+  const result = await resetPasswordByTokenHash(hashVerificationToken(rawToken), nowIso, newPassword);
+
+  if (result.status === "invalid") {
+    return res.status(400).json({ message: "El enlace de recuperacion no es valido." });
+  }
+
+  if (result.status === "expired") {
+    if (result.jugador?.id) {
+      await clearExpiredPasswordResetToken(result.jugador.id);
+    }
+    return res.status(410).json({ message: "El enlace de recuperacion expiro. Solicita uno nuevo." });
+  }
+
+  return res.json({ message: "Contrasena actualizada correctamente. Ya puedes iniciar sesion." });
+}));
+
+app.get("/auth/verify-email", asyncHandler(async (req, res) => {
+  const rawToken = String(req.query?.token || "").trim();
+  const redirectBase = `${getAppBaseUrl(req)}/?tab=partidas`;
+
+  if (!rawToken) {
+    return res.redirect(`${redirectBase}&emailVerification=invalid`);
+  }
+
+  const nowIso = new Date().toISOString();
+  const verificationResult = await verifyEmailByTokenHash(hashVerificationToken(rawToken), nowIso);
+
+  if (verificationResult.status === "expired" && verificationResult.jugador?.id) {
+    await clearExpiredEmailVerificationToken(verificationResult.jugador.id);
+  }
+
+  return res.redirect(`${redirectBase}&emailVerification=${verificationResult.status}`);
+}));
+
+app.get("/auth/reset-password", (req, res) => {
+  const rawToken = String(req.query?.token || "").trim();
+  const target = `/reset-password.html${rawToken ? `?token=${encodeURIComponent(rawToken)}` : ""}`;
+  return res.redirect(target);
+});
 
 app.post("/api/auth/logout", authMiddleware, asyncHandler(async (req, res) => {
   await deleteSesion(req.token);
@@ -499,6 +839,65 @@ app.post("/api/reservations/:reservationId/result", authMiddleware, moderatorMid
 app.get("/api/moderation/reservations", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
   const reservations = (await getReservasParaModeracion()).map(mapReservaModeracion);
   return res.json({ reservations });
+}));
+
+app.get("/api/moderation/events", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const events = (await getEventosParaModeracion()).map(mapEventoModeracion);
+  return res.json({ events });
+}));
+
+app.post("/api/moderation/events", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const FIXED_EVENT_PRICE = "$8000";
+  const title = String(req.body?.title || "").trim();
+  const date = String(req.body?.date || "").trim();
+  const level = String(req.body?.level || "Intermedio").trim() || "Intermedio";
+  const slots = Number.parseInt(req.body?.slots, 10);
+
+  if (!title || !date || Number.isNaN(slots)) {
+    return res.status(400).json({
+      message: "title, date, level y slots son obligatorios para crear una partida.",
+    });
+  }
+
+  if (slots <= 0) {
+    return res.status(400).json({ message: "Los cupos deben ser un numero mayor a 0" });
+  }
+
+  const parsedDate = new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return res.status(400).json({ message: "Fecha invalida para la partida" });
+  }
+
+  const event = {
+    id: uuidv4(),
+    titulo: title,
+    fecha: date,
+    nivel: level,
+    precio: FIXED_EVENT_PRICE,
+    cupos: slots,
+    inscription_start: getMondayOfWeek(date),
+  };
+
+  await createEvento(event);
+  return res.status(201).json({ event: mapEventoModeracion({ ...event, cupos_disponibles: slots, inscritos_totales: 0, inscritos_pendientes: 0, inscritos_cerrados: 0 }) });
+}));
+
+app.delete("/api/moderation/events/:eventId", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {
+  const { eventId } = req.params;
+  const event = await getEventoById(eventId);
+
+  if (!event) {
+    return res.status(404).json({ message: "Partida no encontrada" });
+  }
+
+  const result = await deleteEventoSiSinReservas(eventId);
+  if (!result.deleted) {
+    return res.status(409).json({
+      message: "No puedes cancelar esta partida porque tiene integrantes inscritos.",
+    });
+  }
+
+  return res.json({ message: "Partida cancelada correctamente", eventId });
 }));
 
 app.get("/api/moderation/players", authMiddleware, moderatorMiddleware, asyncHandler(async (req, res) => {

@@ -113,6 +113,9 @@ body {
 }
 
 .header-player-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   margin: 0;
   padding: 0.58rem 0.9rem;
   border-radius: 999px;
@@ -121,6 +124,49 @@ body {
   font-weight: 800;
   font-size: 0.9rem;
   color: var(--ink);
+  cursor: pointer;
+}
+
+.header-user-menu {
+  position: relative;
+}
+
+.header-player-name:hover,
+.header-player-name[aria-expanded="true"] {
+  background: rgba(46, 57, 42, 0.92);
+}
+
+.header-player-caret {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+
+.header-user-dropdown {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  min-width: 180px;
+  padding: 0.4rem;
+  border-radius: 14px;
+  border: 1px solid rgba(130, 145, 114, 0.28);
+  background: rgba(20, 26, 19, 0.96);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.22);
+}
+
+.header-user-dropdown-btn {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  background: rgba(132, 64, 45, 0.2);
+  color: var(--ink);
+  text-align: left;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.header-user-dropdown-btn:hover {
+  background: rgba(132, 64, 45, 0.34);
 }
 
 main {
@@ -603,6 +649,29 @@ select:focus {
   margin: 0 0 0.6rem;
 }
 
+.email-verification-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0 0 0.85rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(178, 95, 73, 0.38);
+  background: rgba(132, 64, 45, 0.16);
+}
+
+.email-verification-banner strong {
+  display: block;
+  margin-bottom: 0.15rem;
+}
+
+.email-verification-text {
+  margin: 0;
+  color: #d8ddd3;
+  font-size: 0.9rem;
+}
+
 .hidden {
   display: none;
 }
@@ -834,6 +903,19 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.moderation-event-form {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: 2fr 1.4fr 1fr 0.8fr auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.moderation-event-form button {
+  width: 100%;
+  white-space: nowrap;
+}
+
 .moderation-player-row {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1023,6 +1105,10 @@ select:focus {
     justify-content: center;
   }
 
+  .header-user-menu {
+    margin-left: auto;
+  }
+
   .hero::after {
     position: static;
     display: block;
@@ -1034,6 +1120,11 @@ select:focus {
   .hero-metrics,
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .email-verification-banner {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .intro-grid,
@@ -1055,6 +1146,10 @@ select:focus {
   }
 
   .moderation-search-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .moderation-event-form {
     grid-template-columns: 1fr;
   }
 

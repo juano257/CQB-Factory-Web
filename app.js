@@ -3,9 +3,12 @@ const STORAGE_TOKEN = "cqb_token";
 const state = {
   token: localStorage.getItem(STORAGE_TOKEN),
   currentUser: null,
+  emailVerificationResult: null,
+  isHeaderMenuOpen: false,
   events: [],
   moderationReservations: [],
   moderationPlayers: [],
+  moderationEvents: [],
   moderatorActiveView: "reservas",
   moderationSearchText: "",
   moderationSearchCategory: "name",
@@ -23,8 +26,12 @@ const refs = {
   authUserView: document.getElementById("auth-user-view"),
   registerForm: document.getElementById("register-form"),
   loginForm: document.getElementById("login-form"),
+  forgotPasswordBtn: document.getElementById("forgot-password-btn"),
   authMessage: document.getElementById("auth-message"),
   welcomeText: document.getElementById("welcome-text"),
+  emailVerificationBanner: document.getElementById("email-verification-banner"),
+  emailVerificationText: document.getElementById("email-verification-text"),
+  resendVerificationBtn: document.getElementById("resend-verification-btn"),
   logoutBtn: document.getElementById("logout-btn"),
   reservationsList: document.getElementById("reservations-list"),
   moderatorPanel: document.getElementById("moderator-panel"),
@@ -44,6 +51,9 @@ const refs = {
   moderatorViewReservas: document.getElementById("moderator-view-reservas"),
   moderatorViewJugadores: document.getElementById("moderator-view-jugadores"),
   moderatorViewBusqueda: document.getElementById("moderator-view-busqueda"),
+  moderatorViewCalendario: document.getElementById("moderator-view-calendario"),
+  moderatorEventForm: document.getElementById("moderator-event-form"),
+  moderatorEventsList: document.getElementById("moderator-events-list"),
   moderatorRefreshBtn: document.getElementById("moderator-refresh-btn"),
   seasonName: document.getElementById("season-name"),
   seasonStatus: document.getElementById("season-status"),
@@ -60,7 +70,11 @@ const refs = {
   nextMatchText: document.getElementById("next-match-text"),
   tabButtons: Array.from(document.querySelectorAll(".tab")),
   headerCta: document.getElementById("header-cta"),
+  headerUserMenu: document.getElementById("header-user-menu"),
   headerPlayerName: document.getElementById("header-player-name"),
+  headerPlayerNameText: document.getElementById("header-player-name-text"),
+  headerUserDropdown: document.getElementById("header-user-dropdown"),
+  headerLogoutBtn: document.getElementById("header-logout-btn"),
   heroRegister: document.getElementById("hero-register"),
   heroLogin: document.getElementById("hero-login"),
   pageTabs: Array.from(document.querySelectorAll(".top-tab")),
@@ -174,10 +188,50 @@ function showMessage(text, isError = false) {
   refs.authMessage.style.color = isError ? "#9b1d1d" : "#2f4b1f";
 }
 
+function consumeEmailVerificationResult() {
+  const params = new URLSearchParams(window.location.search);
+  const status = String(params.get("emailVerification") || "").trim();
+  if (!status) return null;
+
+  params.delete("emailVerification");
+  const nextQuery = params.toString();
+  const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+  window.history.replaceState({}, "", nextUrl);
+  return status;
+}
+
+function showEmailVerificationFeedback(status) {
+  if (!status) return;
+
+  if (status === "verified") {
+    showMessage("Correo verificado con exito. Ya puedes inscribirte a partidas.");
+    return;
+  }
+
+  if (status === "expired") {
+    showMessage("El enlace de verificacion expiro. Inicia sesion y solicita uno nuevo.", true);
+    return;
+  }
+
+  showMessage("El enlace de verificacion no es valido o ya fue utilizado.", true);
+}
+
 function renderHeroMetrics() {
   const now = new Date();
   refs.eventsMonthValue.textContent = String(getEventsInMonth(now));
   refs.eventsMonthLabel.textContent = "Eventos este mes";
+}
+
+function closeHeaderMenu() {
+  state.isHeaderMenuOpen = false;
+  refs.headerPlayerName?.setAttribute("aria-expanded", "false");
+  refs.headerUserDropdown?.classList.add("hidden");
+}
+
+function toggleHeaderMenu() {
+  state.isHeaderMenuOpen = !state.isHeaderMenuOpen;
+  refs.headerPlayerName?.setAttribute("aria-expanded", state.isHeaderMenuOpen ? "true" : "false");
+  refs.headerUserDropdown?.classList.toggle("hidden", !state.isHeaderMenuOpen);
 }
 
 function renderAuthView() {
@@ -194,8 +248,11 @@ function renderAuthView() {
     refs.authUserView.classList.add("hidden");
     refs.welcomeText.textContent = "";
     refs.headerCta.classList.remove("hidden");
-    refs.headerPlayerName.classList.add("hidden");
-    refs.headerPlayerName.textContent = "";
+    refs.headerUserMenu.classList.add("hidden");
+    refs.headerPlayerNameText.textContent = "";
+    refs.emailVerificationBanner.classList.add("hidden");
+    refs.emailVerificationText.textContent = "";
+    closeHeaderMenu();
     return;
   }
 
@@ -203,8 +260,16 @@ function renderAuthView() {
   refs.authUserView.classList.remove("hidden");
   refs.welcomeText.textContent = `Bienvenido, ${user.name}.`;
   refs.headerCta.classList.add("hidden");
-  refs.headerPlayerName.classList.remove("hidden");
-  refs.headerPlayerName.textContent = user.name;
+  refs.headerUserMenu.classList.remove("hidden");
+  refs.headerPlayerNameText.textContent = user.name;
+  refs.headerPlayerName.setAttribute("aria-expanded", state.isHeaderMenuOpen ? "true" : "false");
+  refs.headerUserDropdown.classList.toggle("hidden", !state.isHeaderMenuOpen);
+
+  const needsVerification = !user.emailVerified;
+  refs.emailVerificationBanner.classList.toggle("hidden", !needsVerification);
+  refs.emailVerificationText.textContent = needsVerification
+    ? `Debes verificar ${user.email} para habilitar reservas. Revisa tu bandeja de entrada o solicita un nuevo enlace.`
+    : "";
 }
 
 function renderDashboard() {
@@ -395,7 +460,9 @@ function getModerationSearchPageData() {
 }
 
 function switchModeratorView(viewName) {
-  const nextView = ["reservas", "jugadores", "busqueda"].includes(viewName) ? viewName : "reservas";
+  const nextView = ["reservas", "jugadores", "busqueda", "calendario"].includes(viewName)
+    ? viewName
+    : "reservas";
   state.moderatorActiveView = nextView;
 
   refs.moderatorViewTabs.forEach((button) => {
@@ -405,6 +472,7 @@ function switchModeratorView(viewName) {
   refs.moderatorViewReservas?.classList.toggle("hidden", nextView !== "reservas");
   refs.moderatorViewJugadores?.classList.toggle("hidden", nextView !== "jugadores");
   refs.moderatorViewBusqueda?.classList.toggle("hidden", nextView !== "busqueda");
+  refs.moderatorViewCalendario?.classList.toggle("hidden", nextView !== "calendario");
 }
 
 function renderModeratorPanel() {
@@ -418,6 +486,7 @@ function renderModeratorPanel() {
     refs.moderatorReservationsList.innerHTML = "";
     refs.moderatorPlayersList.innerHTML = "";
     refs.moderatorSearchResults.innerHTML = "";
+    refs.moderatorEventsList.innerHTML = "";
     if (refs.moderatorSearchPageInfo) {
       refs.moderatorSearchPageInfo.textContent = "Pagina 1 de 1";
     }
@@ -551,6 +620,55 @@ function renderModeratorPanel() {
     ? state.moderationPlayers.map(renderModeratorPlayerRow).join("")
     : "<li class='reservation-item'>No hay jugadores registrados.</li>";
 
+  refs.moderatorEventsList.innerHTML = state.moderationEvents.length
+    ? state.moderationEvents
+        .map((event) => {
+          const canCancel = Number(event.enrolledTotal || 0) === 0;
+          return `
+            <li class="moderation-event-card">
+              <div class="moderation-event-head">
+                <div class="reservation-details moderator-details">
+                  <strong>${event.title}</strong>
+                  <span>${formatDate(event.date)}</span>
+                  <span>${event.level} | ${event.price}</span>
+                </div>
+                <div class="moderator-meta">
+                  <span class="status-pill status-upcoming">Cupos: ${event.availableSlots}/${event.slots}</span>
+                  <span class="status-pill ${canCancel ? "status-upcoming" : "status-played"}">
+                    Inscritos: ${event.enrolledTotal}
+                  </span>
+                </div>
+              </div>
+
+              <div class="moderation-scoreboard">
+                <article>
+                  <span class="value">${event.enrolledUpcoming}</span>
+                  <span class="label">Pendientes</span>
+                </article>
+                <article>
+                  <span class="value">${event.enrolledPlayed}</span>
+                  <span class="label">Cerradas</span>
+                </article>
+              </div>
+
+              <div class="reservation-actions">
+                <button
+                  class="btn btn-danger"
+                  type="button"
+                  data-action="cancel-event"
+                  data-event-id="${event.id}"
+                  data-event-title="${event.title}"
+                  ${canCancel ? "" : "disabled"}
+                >
+                  Cancelar partida
+                </button>
+              </div>
+            </li>
+          `;
+        })
+        .join("")
+    : "<li class='reservation-item'>No hay partidas cargadas en el calendario.</li>";
+
   const pageData = getModerationSearchPageData();
   refs.moderatorSearchResults.innerHTML = pageData.items.length
     ? pageData.items.map(renderModeratorPlayerRow).join("")
@@ -580,11 +698,15 @@ function renderEvents() {
       const alreadyJoined = Boolean(currentReservation);
 
       const disabled = !currentUser || !seasonActive || !event.canInscribe || booked >= event.slots || alreadyJoined;
+      const emailNotVerified = Boolean(currentUser && !currentUser.emailVerified);
       const selectedTeam = currentReservation?.team || "rojo";
-      const teamDisabled = !currentUser || !seasonActive || !event.canInscribe || booked >= event.slots || alreadyJoined;
+      const teamDisabled = !currentUser || !seasonActive || !event.canInscribe || booked >= event.slots || alreadyJoined || emailNotVerified;
+
+      const isDisabled = disabled || emailNotVerified;
 
       let buttonLabel = "Inscribirme y pagar";
       if (!currentUser) buttonLabel = "Inicia sesion";
+      if (emailNotVerified) buttonLabel = "Verifica tu correo";
       if (!seasonActive) buttonLabel = "Temporada cerrada";
       if (!event.canInscribe) buttonLabel = "Abre lunes 00:00";
       if (alreadyJoined) buttonLabel = "Ya inscrito";
@@ -608,7 +730,7 @@ function renderEvents() {
               <option value="azul" ${selectedTeam === "azul" ? "selected" : ""}>Equipo Azul</option>
             </select>
           </label>
-          <button class="btn btn-primary" data-event-id="${event.id}" ${disabled ? "disabled" : ""}>
+          <button class="btn btn-primary" data-event-id="${event.id}" ${isDisabled ? "disabled" : ""}>
             ${buttonLabel}
           </button>
         </article>
@@ -692,6 +814,16 @@ async function refreshModerationPlayers() {
   state.moderationPlayers = data.players || [];
 }
 
+async function refreshModerationEvents() {
+  if (!isStaffRole(state.currentUser?.role)) {
+    state.moderationEvents = [];
+    return;
+  }
+
+  const data = await apiRequest("/api/moderation/events");
+  state.moderationEvents = data.events || [];
+}
+
 async function registerUser(formData) {
   const name = formData.get("name")?.toString().trim();
   const email = formData.get("email")?.toString().trim().toLowerCase();
@@ -713,8 +845,11 @@ async function registerUser(formData) {
     state.moderationReservations = [];
     await refreshCurrentSeason();
     refs.registerForm.reset();
-    showMessage("Cuenta creada con exito. Ya puedes inscribirte.");
+    showMessage(data.message || "Cuenta creada con exito. Revisa tu correo para verificarla.");
     await refreshEvents();
+    await refreshModerationReservations();
+    await refreshModerationPlayers();
+    await refreshModerationEvents();
     render();
   } catch (error) {
     showMessage(error.message, true);
@@ -735,10 +870,15 @@ async function loginUser(formData) {
     state.currentUser = data.user;
     await refreshCurrentSeason();
     refs.loginForm.reset();
-    showMessage("Sesion iniciada. Revisa tus partidas en el panel.");
+    showMessage(
+      data.verificationRequired
+        ? "Sesion iniciada. Debes verificar tu correo para poder reservar."
+        : "Sesion iniciada. Revisa tus partidas en el panel."
+    );
     await refreshEvents();
     await refreshModerationReservations();
     await refreshModerationPlayers();
+    await refreshModerationEvents();
     render();
   } catch (error) {
     showMessage(error.message, true);
@@ -758,10 +898,45 @@ async function logoutUser() {
   state.currentUser = null;
   state.moderationReservations = [];
   state.moderationPlayers = [];
+  state.moderationEvents = [];
   state.currentSeason = null;
   showMessage("Sesion cerrada.");
   await refreshEvents();
   render();
+}
+
+async function resendVerificationEmail() {
+  try {
+    const data = await apiRequest("/api/auth/resend-verification", { method: "POST" });
+    await refreshCurrentUser();
+    render();
+    showMessage(data.message || "Te enviamos un nuevo enlace de verificacion.");
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function requestPasswordReset() {
+  const emailInput = refs.loginForm?.querySelector('input[name="email"]');
+  const loginEmail = emailInput instanceof HTMLInputElement ? emailInput.value.trim().toLowerCase() : "";
+  const promptEmail = loginEmail || window.prompt("Ingresa tu correo para recuperar contrasena:", "") || "";
+  const email = String(promptEmail).trim().toLowerCase();
+
+  if (!email) {
+    showMessage("Debes ingresar un correo para continuar.", true);
+    return;
+  }
+
+  try {
+    const data = await apiRequest("/api/auth/password/forgot", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+
+    showMessage(data.message || "Si el correo existe, te enviamos un enlace de recuperacion.");
+  } catch (error) {
+    showMessage(error.message, true);
+  }
 }
 
 async function joinEvent(eventId, team) {
@@ -827,6 +1002,7 @@ async function endSeason() {
     await refreshCurrentSeason();
     await refreshModerationReservations();
     await refreshModerationPlayers();
+    await refreshModerationEvents();
     await refreshEvents();
     await refreshCurrentUser();
     render();
@@ -842,10 +1018,51 @@ async function startSeason() {
     await refreshCurrentSeason();
     await refreshModerationReservations();
     await refreshModerationPlayers();
+    await refreshModerationEvents();
     await refreshEvents();
     await refreshCurrentUser();
     render();
     showMessage(`${data.season.name} iniciada. Las estadisticas fueron reiniciadas.`);
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function createModerationEvent(formData) {
+  const title = formData.get("title")?.toString().trim();
+  const date = formData.get("date")?.toString().trim();
+  const level = formData.get("level")?.toString().trim() || "Intermedio";
+  const slots = Number(formData.get("slots"));
+
+  if (!title || !date || Number.isNaN(slots)) {
+    showMessage("Completa todos los campos para crear una partida.", true);
+    return;
+  }
+
+  try {
+    await apiRequest("/api/moderation/events", {
+      method: "POST",
+      body: JSON.stringify({ title, date, level, slots }),
+    });
+
+    refs.moderatorEventForm.reset();
+    await refreshEvents();
+    await refreshModerationEvents();
+    render();
+    showMessage("Partida creada y agregada al calendario.");
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function cancelModerationEvent(eventId, eventTitle) {
+  try {
+    await apiRequest(`/api/moderation/events/${eventId}`, { method: "DELETE" });
+    await refreshEvents();
+    await refreshModerationEvents();
+    await refreshModerationReservations();
+    render();
+    showMessage(`Partida cancelada: ${eventTitle}.`);
   } catch (error) {
     showMessage(error.message, true);
   }
@@ -874,6 +1091,38 @@ function setupEvents() {
     await logoutUser();
   });
 
+  refs.forgotPasswordBtn?.addEventListener("click", async () => {
+    await requestPasswordReset();
+  });
+
+  refs.resendVerificationBtn?.addEventListener("click", async () => {
+    await resendVerificationEmail();
+  });
+
+  refs.headerPlayerName?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleHeaderMenu();
+  });
+
+  refs.headerLogoutBtn?.addEventListener("click", async () => {
+    closeHeaderMenu();
+    await logoutUser();
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (!state.isHeaderMenuOpen) return;
+    if (refs.headerUserMenu?.contains(target)) return;
+    closeHeaderMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.isHeaderMenuOpen) {
+      closeHeaderMenu();
+    }
+  });
+
   refs.eventsGrid.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) return;
@@ -894,9 +1143,15 @@ function setupEvents() {
     await refreshCurrentSeason();
     await refreshModerationReservations();
     await refreshModerationPlayers();
+    await refreshModerationEvents();
     await refreshEvents();
     render();
     showMessage("Panel de moderacion actualizado.");
+  });
+
+  refs.moderatorEventForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await createModerationEvent(new FormData(refs.moderatorEventForm));
   });
 
   refs.moderatorViewTabs.forEach((button) => {
@@ -989,6 +1244,23 @@ function setupEvents() {
     await submitWinningTeam(eventId, winningTeam);
   });
 
+  refs.moderatorEventsList?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) return;
+    if (target.dataset.action !== "cancel-event") return;
+
+    const eventId = target.dataset.eventId;
+    const eventTitle = target.dataset.eventTitle || "Partida";
+    if (!eventId) return;
+
+    const confirmed = window.confirm(
+      `Se cancelara la partida \"${eventTitle}\". Esta accion no se puede deshacer.\n\n¿Quieres continuar?`
+    );
+    if (!confirmed) return;
+
+    await cancelModerationEvent(eventId, eventTitle);
+  });
+
   refs.headerCta.addEventListener("click", () => {
     switchPageTab("partidas");
     switchAuthTab("register");
@@ -1017,6 +1289,7 @@ function render() {
 }
 
 async function init() {
+  state.emailVerificationResult = consumeEmailVerificationResult();
   const urlTab = new URLSearchParams(window.location.search).get("tab");
   const allowedTabs = ["inicio", "partidas", "moderar", "contacto"];
   const initialTab = allowedTabs.includes(urlTab) ? urlTab : "inicio";
@@ -1029,8 +1302,10 @@ async function init() {
   await refreshCurrentSeason();
   await refreshModerationReservations();
   await refreshModerationPlayers();
+  await refreshModerationEvents();
 
   render();
+  showEmailVerificationFeedback(state.emailVerificationResult);
 }
 
 init();

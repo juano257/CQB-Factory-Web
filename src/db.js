@@ -38,6 +38,7 @@ const pool = new Pool({
 
 const moderatorEmails = ["juan.erazo.gajardo@gmail.com"];
 const moderatorEmailSet = new Set(moderatorEmails.map((email) => String(email).trim().toLowerCase()));
+const FIXED_EVENT_PRICE = "$8000";
 
 async function initDb() {
   await pool.query(`
@@ -97,6 +98,16 @@ async function initDb() {
     );
   `);
 
+  await pool.query(`
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS email_verificado BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT;
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS email_verification_expires_at TEXT;
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS email_verification_sent_at TEXT;
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS password_reset_token_hash TEXT;
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS password_reset_expires_at TEXT;
+    ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS password_reset_sent_at TEXT;
+  `);
+
   for (const email of moderatorEmails) {
     await pool.query(
       "UPDATE jugadores SET rol = 'moderator' WHERE LOWER(TRIM(correo)) = $1 AND rol != 'moderator'",
@@ -147,6 +158,9 @@ async function initDb() {
       }
     }
   }
+
+  // Precio estandar para todas las partidas, incluidas las ya existentes.
+  await pool.query("UPDATE eventos SET precio = $1", [FIXED_EVENT_PRICE]);
 }
 
 function isModeratorEmail(correo) {
@@ -238,7 +252,7 @@ const seedEventTemplates = [
     hour: 20,
     minute: 0,
     nivel: "Intermedio",
-    precio: "$14",
+    precio: FIXED_EVENT_PRICE,
     cupos: 40,
   },
   {
@@ -248,7 +262,7 @@ const seedEventTemplates = [
     hour: 10,
     minute: 30,
     nivel: "Principiante",
-    precio: "$10",
+    precio: FIXED_EVENT_PRICE,
     cupos: 40,
   },
   {
@@ -258,7 +272,7 @@ const seedEventTemplates = [
     hour: 17,
     minute: 0,
     nivel: "Intermedio",
-    precio: "$12",
+    precio: FIXED_EVENT_PRICE,
     cupos: 40,
   },
   {
@@ -268,7 +282,7 @@ const seedEventTemplates = [
     hour: 11,
     minute: 0,
     nivel: "Principiante",
-    precio: "$10",
+    precio: FIXED_EVENT_PRICE,
     cupos: 40,
   },
   {
@@ -278,7 +292,7 @@ const seedEventTemplates = [
     hour: 16,
     minute: 30,
     nivel: "Avanzado",
-    precio: "$18",
+    precio: FIXED_EVENT_PRICE,
     cupos: 40,
   },
 ];
@@ -334,12 +348,141 @@ async function getJugadorById(id) {
 async function createJugador(jugador) {
   await pool.query(
     `INSERT INTO jugadores
-      (id, nombre, correo, contrasena, rol, victorias, derrotas, partidas_jugadas, reservas_activas, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      (id, nombre, correo, contrasena, rol, victorias, derrotas, partidas_jugadas, reservas_activas, created_at, email_verificado, email_verification_token_hash, email_verification_expires_at, email_verification_sent_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       jugador.id, jugador.nombre, jugador.correo, jugador.contrasena, jugador.rol,
       jugador.victorias, jugador.derrotas, jugador.partidas_jugadas, jugador.reservas_activas, jugador.created_at,
+      Boolean(jugador.email_verificado),
+      jugador.email_verification_token_hash || null,
+      jugador.email_verification_expires_at || null,
+      jugador.email_verification_sent_at || null,
     ]
+  );
+}
+
+async function saveEmailVerificationToken(jugadorId, tokenHash, expiresAt, sentAt) {
+  await pool.query(
+    `UPDATE jugadores
+     SET
+       email_verificado = FALSE,
+       email_verification_token_hash = $1,
+       email_verification_expires_at = $2,
+       email_verification_sent_at = $3
+     WHERE id = $4`,
+    [tokenHash, expiresAt, sentAt, jugadorId]
+  );
+}
+
+async function verifyEmailByTokenHash(tokenHash, nowIso) {
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM jugadores
+     WHERE email_verification_token_hash = $1
+     LIMIT 1`,
+    [tokenHash]
+  );
+
+  const jugador = rows[0] || null;
+  if (!jugador) {
+    return { status: "invalid", jugador: null };
+  }
+
+  if (jugador.email_verification_expires_at && jugador.email_verification_expires_at < nowIso) {
+    return { status: "expired", jugador };
+  }
+
+  const { rows: updatedRows } = await pool.query(
+    `UPDATE jugadores
+     SET
+       email_verificado = TRUE,
+       email_verification_token_hash = NULL,
+       email_verification_expires_at = NULL,
+       email_verification_sent_at = NULL
+     WHERE id = $1
+     RETURNING *`,
+    [jugador.id]
+  );
+
+  return { status: "verified", jugador: updatedRows[0] || jugador };
+}
+
+async function clearExpiredEmailVerificationToken(jugadorId) {
+  await pool.query(
+    `UPDATE jugadores
+     SET
+       email_verification_token_hash = NULL,
+       email_verification_expires_at = NULL
+     WHERE id = $1`,
+    [jugadorId]
+  );
+}
+
+async function savePasswordResetToken(jugadorId, tokenHash, expiresAt, sentAt) {
+  await pool.query(
+    `UPDATE jugadores
+     SET
+       password_reset_token_hash = $1,
+       password_reset_expires_at = $2,
+       password_reset_sent_at = $3
+     WHERE id = $4`,
+    [tokenHash, expiresAt, sentAt, jugadorId]
+  );
+}
+
+async function resetPasswordByTokenHash(tokenHash, nowIso, newPassword) {
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM jugadores
+     WHERE password_reset_token_hash = $1
+     LIMIT 1`,
+    [tokenHash]
+  );
+
+  const jugador = rows[0] || null;
+  if (!jugador) {
+    return { status: "invalid", jugador: null };
+  }
+
+  if (jugador.password_reset_expires_at && jugador.password_reset_expires_at < nowIso) {
+    return { status: "expired", jugador };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: updatedRows } = await client.query(
+      `UPDATE jugadores
+       SET
+         contrasena = $1,
+         password_reset_token_hash = NULL,
+         password_reset_expires_at = NULL,
+         password_reset_sent_at = NULL
+       WHERE id = $2
+       RETURNING *`,
+      [newPassword, jugador.id]
+    );
+
+    await client.query("DELETE FROM sesiones WHERE jugador_id = $1", [jugador.id]);
+    await client.query("COMMIT");
+
+    return { status: "reset", jugador: updatedRows[0] || jugador };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function clearExpiredPasswordResetToken(jugadorId) {
+  await pool.query(
+    `UPDATE jugadores
+     SET
+       password_reset_token_hash = NULL,
+       password_reset_expires_at = NULL
+     WHERE id = $1`,
+    [jugadorId]
   );
 }
 
@@ -393,6 +536,69 @@ async function getEventosConDisponibilidad() {
     [temporadaId]
   );
   return rows;
+}
+
+async function getEventosParaModeracion() {
+  const temporada = await getTemporadaActual();
+  const temporadaId = temporada?.id || -1;
+  const { rows } = await pool.query(
+    `SELECT
+      e.id,
+      e.titulo,
+      e.fecha,
+      e.nivel,
+      e.precio,
+      e.cupos,
+      COALESCE(t.total_reservas, 0) AS inscritos_totales,
+      COALESCE(t.reservas_activas, 0) AS inscritos_pendientes,
+      COALESCE(t.reservas_cerradas, 0) AS inscritos_cerrados,
+      GREATEST(0, e.cupos - COALESCE(t.reservas_activas, 0)) AS cupos_disponibles
+    FROM eventos e
+    LEFT JOIN (
+      SELECT
+        evento_id,
+        COUNT(*) AS total_reservas,
+        COUNT(*) FILTER (WHERE estado = 'upcoming') AS reservas_activas,
+        COUNT(*) FILTER (WHERE estado = 'played') AS reservas_cerradas
+      FROM reservas
+      WHERE temporada_id = $1
+      GROUP BY evento_id
+    ) t ON t.evento_id = e.id
+    ORDER BY e.fecha ASC`,
+    [temporadaId]
+  );
+  return rows;
+}
+
+async function createEvento(evento) {
+  await pool.query(
+    `INSERT INTO eventos
+      (id, titulo, fecha, nivel, precio, cupos, inscription_start)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      evento.id,
+      evento.titulo,
+      evento.fecha,
+      evento.nivel,
+      evento.precio,
+      evento.cupos,
+      evento.inscription_start || null,
+    ]
+  );
+}
+
+async function deleteEventoSiSinReservas(eventoId) {
+  const { rows } = await pool.query(
+    "SELECT COUNT(*) AS total FROM reservas WHERE evento_id = $1",
+    [eventoId]
+  );
+  const totalReservas = parseInt(rows[0]?.total, 10) || 0;
+  if (totalReservas > 0) {
+    return { deleted: false, totalReservas };
+  }
+
+  const result = await pool.query("DELETE FROM eventos WHERE id = $1", [eventoId]);
+  return { deleted: result.rowCount > 0, totalReservas: 0 };
 }
 
 async function getEventoById(eventoId) {
@@ -623,11 +829,20 @@ module.exports = {
   getJugadorByCorreo,
   getJugadorById,
   createJugador,
+  saveEmailVerificationToken,
+  verifyEmailByTokenHash,
+  clearExpiredEmailVerificationToken,
+  savePasswordResetToken,
+  resetPasswordByTokenHash,
+  clearExpiredPasswordResetToken,
   upsertSesion,
   getSesionByToken,
   deleteSesion,
   getReservasByJugador,
   getEventosConDisponibilidad,
+  getEventosParaModeracion,
+  createEvento,
+  deleteEventoSiSinReservas,
   getEventoById,
   hasReservaActiva,
   countReservasActivasPorEvento,

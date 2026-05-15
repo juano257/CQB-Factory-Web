@@ -208,7 +208,10 @@ async function init() {
   }
 
   try {
-    await apiRequest("/api/me");
+    const me = await apiRequest("/api/me");
+    if (!me.user?.emailVerified) {
+      throw new Error("Debes verificar tu correo antes de continuar con la inscripcion.");
+    }
     await loadEvent();
     setupEvents();
     disableForm(false);

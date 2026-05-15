@@ -8,6 +8,7 @@
       name="description"
       content="Inscribete a partidas CQB de airsoft, crea tu cuenta y lleva tu progreso en CQB Factory."
     />
+    <link rel="canonical" href="https://cqbfactory.com/" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -27,7 +28,15 @@
         <button class="top-tab" data-page-tab="contacto">Contacto</button>
       </nav>
       <button id="header-cta" class="btn btn-primary">Crear cuenta</button>
-      <p id="header-player-name" class="header-player-name hidden"></p>
+      <div id="header-user-menu" class="header-user-menu hidden">
+        <button id="header-player-name" class="header-player-name" type="button" aria-expanded="false" aria-haspopup="true">
+          <span id="header-player-name-text"></span>
+          <span class="header-player-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="header-user-dropdown" class="header-user-dropdown hidden">
+          <button id="header-logout-btn" class="header-user-dropdown-btn" type="button">Cerrar sesion</button>
+        </div>
+      </div>
     </header>
 
     <main>
@@ -158,12 +167,20 @@
                 <p class="rank-info-box">
                   Tu rango sera calculado segun tu cantidad de partidas jugadas y tu porcentaje de victorias, cada cierto tiempo regalaremos equipo a el mejor jugador de cada temporada y se reiniciaran los rangos de todos los agentes activos,¿Estas listo para el reto?
                 </p>
+                <button id="forgot-password-btn" class="btn btn-ghost" type="button">Olvide mi contrasena</button>
                 <button class="btn btn-primary" type="submit">Entrar a mi cuenta</button>
               </form>
             </div>
 
             <div id="auth-user-view" class="hidden">
               <p id="welcome-text" class="welcome-text"></p>
+              <div id="email-verification-banner" class="email-verification-banner hidden">
+                <div>
+                  <strong>Verifica tu correo</strong>
+                  <p id="email-verification-text" class="email-verification-text"></p>
+                </div>
+                <button id="resend-verification-btn" class="btn btn-ghost" type="button">Reenviar enlace</button>
+              </div>
               <button id="logout-btn" class="btn btn-ghost">Cerrar sesion</button>
             </div>
 
@@ -260,6 +277,7 @@
             <button class="moderator-view-tab active" data-moderator-view="reservas" type="button">Reservas</button>
             <button class="moderator-view-tab" data-moderator-view="jugadores" type="button">Jugadores</button>
             <button class="moderator-view-tab" data-moderator-view="busqueda" type="button">Busqueda</button>
+            <button class="moderator-view-tab" data-moderator-view="calendario" type="button">Calendario</button>
           </div>
 
           <div id="moderator-view-reservas">
@@ -310,6 +328,34 @@
               <span id="moderator-search-page-info" class="label">Pagina 1 de 1</span>
               <button id="moderator-search-next" class="btn btn-ghost" type="button">Siguiente</button>
             </div>
+          </div>
+
+          <div id="moderator-view-calendario" class="hidden">
+            <form id="moderator-event-form" class="moderation-event-form">
+              <label>
+                Titulo
+                <input id="moderator-event-title" name="title" type="text" required minlength="4" />
+              </label>
+              <label>
+                Fecha y hora
+                <input id="moderator-event-date" name="date" type="datetime-local" required />
+              </label>
+              <label>
+                Nivel
+                <select id="moderator-event-level" name="level" required>
+                  <option value="Principiante">Principiante</option>
+                  <option value="Intermedio" selected>Intermedio</option>
+                  <option value="Avanzado">Avanzado</option>
+                </select>
+              </label>
+              <label>
+                Cupos
+                <input id="moderator-event-slots" name="slots" type="number" min="1" step="1" value="40" required />
+              </label>
+              <button class="btn btn-primary" type="submit">Crear partida</button>
+            </form>
+
+            <ul id="moderator-events-list" class="moderation-events-list"></ul>
           </div>
         </section>
       </section>
