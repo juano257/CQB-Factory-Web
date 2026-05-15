@@ -101,6 +101,8 @@ function normalizeRequestHost(hostValue) {
 app.use((req, res, next) => {
   if (process.env.NODE_ENV !== "production") return next();
 
+  if (req.path === "/api/health") return next();
+
   const canonicalHost = getCanonicalHost();
   if (!canonicalHost) return next();
 

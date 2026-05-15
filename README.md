@@ -104,6 +104,62 @@ npm run dev
 
 - http://localhost:3000
 
+## Deployment en Node.js (produccion)
+
+Pasos recomendados para un servidor Linux con Node 20+:
+
+1. Instalar dependencias de produccion:
+
+```bash
+npm ci --omit=dev
+```
+
+2. Configurar variables de entorno en `.env`:
+
+```bash
+NODE_ENV=production
+PORT=3000
+DATABASE_URL=postgresql://...
+DB_SSL=true
+DB_SSL_REJECT_UNAUTHORIZED=false
+APP_URL=https://tu-dominio.com
+CANONICAL_HOST=tu-dominio.com
+CANONICAL_PROTOCOL=https
+```
+
+3. Probar conexion a base de datos:
+
+```bash
+npm run db:check
+```
+
+4. Levantar servicio Node:
+
+```bash
+npm start
+```
+
+5. Verificar salud del backend:
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
+Respuesta esperada:
+
+```json
+{"ok":true,"service":"cqb-backend","database":"postgresql"}
+```
+
+Opcional (recomendado): ejecutar con PM2 para autorestart.
+
+```bash
+npm i -g pm2
+pm2 start npm --name cqb-factory -- start
+pm2 save
+pm2 startup
+```
+
 ## Endpoints backend inicial
 
 - `GET /api/health`

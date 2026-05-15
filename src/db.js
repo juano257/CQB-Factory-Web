@@ -824,8 +824,13 @@ async function iniciarNuevaTemporada() {
   }
 }
 
+async function closeDb() {
+  await pool.end();
+}
+
 module.exports = {
   initDb,
+  closeDb,
   getJugadorByCorreo,
   getJugadorById,
   createJugador,
