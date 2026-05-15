@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  deployments: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -23,7 +27,7 @@ jobs:
           initial-status: in_progress
 
       - name: Notify deployment success
-        if: success()
+        if: success() && steps.deployment.outputs.deployment_id != ''
         uses: chrnorm/deployment-status@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -31,7 +35,7 @@ jobs:
           state: success
 
       - name: Notify deployment failure
-        if: failure()
+        if: failure() && steps.deployment.outputs.deployment_id != ''
         uses: chrnorm/deployment-status@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
