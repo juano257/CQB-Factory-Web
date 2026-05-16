@@ -33,7 +33,7 @@ El registro envia automaticamente un enlace de verificacion al correo del usuari
 Configuracion recomendada con Brevo en `.env`:
 
 ```bash
-APP_URL=https://cqbfactory.com
+APP_URL=https://cqb-factory.com
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
@@ -50,9 +50,9 @@ Notas:
 - Las reservas quedan bloqueadas hasta verificar el correo.
 - El usuario puede reenviar el enlace desde la interfaz cuando tenga sesion iniciada.
 
-## Dominio en produccion (cqbfactory.com)
+## Dominio en produccion (cqb-factory.com)
 
-Para que la app responda en `https://cqbfactory.com`:
+Para que la app responda en `https://cqb-factory.com`:
 
 1. Apunta DNS del dominio al servidor donde corre Node (o al proxy inverso).
 2. Configura HTTPS (Cloudflare, Nginx + Let's Encrypt, o tu proveedor de hosting).
@@ -60,9 +60,9 @@ Para que la app responda en `https://cqbfactory.com`:
 
 ```bash
 NODE_ENV=production
-APP_URL=https://cqbfactory.com
+APP_URL=https://cqb-factory.com
 # Opcional si quieres forzar canónico explícito:
-# CANONICAL_HOST=cqbfactory.com
+# CANONICAL_HOST=cqb-factory.com
 # CANONICAL_PROTOCOL=https
 ```
 
